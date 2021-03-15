@@ -3,7 +3,7 @@
 pneumocode - An all-in-one inference and stochastic simulation class for pneumococcus transmission models in python.
 
 This is the source code for the class in which you can find comments on how pneumocode works internally. Please 
-also feel free to consult the tutorial Jupyter Notebook for a more user-friendly experience.
+also feel free to consult the Jupyter Notebooks for a more user-friendly experience.
 
 
 """
