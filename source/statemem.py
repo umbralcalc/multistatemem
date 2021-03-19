@@ -1,28 +1,29 @@
 """
 
-pneumocode - An all-in-one inference and stochastic simulation class for pneumococcus transmission models in python.
+statemem - An all-in-one inference and stochastic simulation class for inferring multi-state models with a
+counting memory which records previous state occupations.
 
-This is the source code for the class in which you can find comments on how pneumocode works internally. Please 
+This is the source code for the class in which you can find comments on how statemem works internally. Please 
 also feel free to consult the Jupyter Notebooks for a more user-friendly experience.
 
 
 """
 
-# Necessary imports - these python modules must be installed to use the pneumocode class
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import scipy.special as spec
 
 
-# Initialise the 'pneumocode' method class
-class pneumocode:
+# Initialise the 'statemem' method class
+class statemem:
 
 
     def __init__(self,model_mode,num_of_serotypes,suppress_terminal_output=False):
         """
 
-        pneumocode - An all-in-one inference and stochastic simulation class for pneumococcus transmission models in python.
+        statemem - An all-in-one inference and stochastic simulation class for multi-state models with a counting 
+        memory which records previous state occupations.
 
         Args:
 
