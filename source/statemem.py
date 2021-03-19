@@ -1,10 +1,13 @@
 """
 
-statemem - An all-in-one inference and stochastic simulation class for inferring multi-state models with a
-counting memory which records previous state occupations.
+statemem - Stochastic simulation and ODE class
+class for inferring multi-state models with a counting 
+memory which records previous state occupations.
 
-This is the source code for the class in which you can find comments on how statemem works internally. Please 
-also feel free to consult the Jupyter Notebooks for a more user-friendly experience.
+This is the source code for the class in which you can 
+find comments on how statemem works internally. Please 
+also feel free to consult the Jupyter Notebooks in the
+public repo for a more user-friendly experience.
 
 """
 
