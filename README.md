@@ -1,4 +1,4 @@
-# pneumocode
-A python class for multi-serotype stochastic simulations and statistical inference of Streptococcus pneumoniae transmission
+# statemem
+A python class for inferring multi-state models with a counting memory which records previous state occupations.
 
 Build in progress.
