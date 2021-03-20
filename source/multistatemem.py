@@ -1,6 +1,6 @@
 """
 
-statemem - A stochastic simulation and ODE solver
+multistatemem - A stochastic simulation and ODE solver
 class for inferring multi-state models with a counting 
 memory which records previous state occupations. This
 is currently written for pneumococcus-like models but 
@@ -19,14 +19,14 @@ import matplotlib.pyplot as plt
 import scipy.special as spec
 
 
-# Initialise the 'statemem' method class
-class statemem:
+# Initialise the 'multistatemem' method class
+class multistatemem:
     def __init__(self, model_mode: str, num_of_states: int):
         """
 
-        statemem - An all-in-one inference and stochastic simulation 
-        class for multi-state models with a counting memory which 
-        records previous state occupations.
+        multistatemem - An all-in-one inference and stochastic 
+        simulation class for multi-state models with a counting 
+        memory which records previous state occupations.
 
         Args:
         model_mode
