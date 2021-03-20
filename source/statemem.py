@@ -660,11 +660,10 @@ class statemem:
                 },
             }
 
-    def fit_data(self, df: pd.DataFrame):
+    def lnlikelihood(self, df: pd.DataFrame) -> float:
         """
 
-        Method to fit the maximum a posteriori parameters to 
-        an input ensemble dataset.
+        Method evaluate the log-likelihood given an input set of data.
 
         Args:
         df
