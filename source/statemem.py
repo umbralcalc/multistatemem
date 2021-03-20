@@ -1,8 +1,10 @@
 """
 
-statemem - Stochastic simulation and ODE class
+statemem - A stochastic simulation and ODE solver
 class for inferring multi-state models with a counting 
-memory which records previous state occupations.
+memory which records previous state occupations. This
+is currently written for pneumococcus-like models but 
+may be generalised to others in the future.
 
 This is the source code for the class in which you can 
 find comments on how statemem works internally. Please 
@@ -98,7 +100,7 @@ class statemem:
                 class init)
                 'npast' : Past number of occupations for each state [Mandatory]
                 (array of length length 'num_of_states' at class init)
-                Lam'  : The occupation rate for each state [Mandatory]
+                'Lam'  : The occupation rate for each state [Mandatory]
                 array of length length 'num_of_states' at class init)
                 'mu'   : The recovery rate from each state [Mandatory]
                 (array of length length 'num_of_states' at class init)
