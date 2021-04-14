@@ -1,6 +1,6 @@
 """
 
-multistatemem - A stochastic simulation and ODE solver
+pneumoinfer - A stochastic simulation and ODE solver
 class for inferring multi-state models with a counting 
 memory which records previous state occupations. This
 is currently written for pneumococcus-like models but 
@@ -19,12 +19,12 @@ import matplotlib.pyplot as plt
 import scipy.special as spec
 
 
-# Initialise the 'multistatemem' method class
-class multistatemem:
+# Initialise the 'pneumoinfer' method class
+class pneumoinfer:
     def __init__(self, model_mode: str, num_of_states: int):
         """
 
-        multistatemem - An all-in-one inference and stochastic 
+        pneumoinfer - An all-in-one inference and stochastic 
         simulation class for multi-state models with a counting 
         memory which records previous state occupations.
 
