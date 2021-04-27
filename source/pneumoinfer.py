@@ -7,7 +7,7 @@ is currently written for pneumococcus-like models but
 may be generalised to others in the future.
 
 This is the source code for the class in which you can 
-find comments on how statemem works internally. Please 
+find comments on how pneumoinfer works internally. Please 
 also feel free to consult the Jupyter Notebooks in the
 public repo for a more user-friendly experience.
 
@@ -51,36 +51,36 @@ class pneumoinfer:
 
     @property
     def pop(self):
-        if self._pop is None:
-            if self.mode == "fixed":
-                self._pop = {"sig": [], "eps": [], "mumax": [], "Curr": []}
-                for ns in range(1, self.nstat + 1):
-                    # The number of past occupations of this state
-                    self._pop["npast_" + str(ns)] = []
+        if self._pop is None:  
+            self._pop = {"sig": [], "eps": [], "mumax": [], "Curr": []}
+            for ns in range(1, self.nstat + 1):
+                # The number of past occupations of this state
+                self._pop["npast_" + str(ns)] = []
+                # The recovery rate from this state
+                self._pop["mu_" + str(ns)] = []
+                # The competitiveness factor of this state
+                self._pop["f_" + str(ns)] = []
+                # The vaccine efficacy against this state
+                self._pop["vef_" + str(ns)] = []
+                # The time of vaccination against this state
+                self._pop["vt_" + str(ns)] = []
+                if self.mode == "fixed":
                     # The occupation rate of this state
                     self._pop["Lam_" + str(ns)] = []
-                    # The recovery rate from this state
-                    self._pop["mu_" + str(ns)] = []
-                    # The competitiveness factor of this state
-                    self._pop["f_" + str(ns)] = []
-                    # The vaccine efficacy against this state
-                    self._pop["vef_" + str(ns)] = []
-                    # The time of vaccination against this state
-                    self._pop["vt_" + str(ns)] = []
         return self._pop
 
     @property
     def ode_pop(self):
         if self._ode_pop is None:
-            if self.mode == "fixed":
-                self._ode_pop = {"sig": [], "eps": [], "mumax": [], "Curr": [], "N": []}
-                for ns in range(1, self.nstat + 1):
-                    self._ode_pop["npast_" + str(ns)] = []
+            self._ode_pop = {"sig": [], "eps": [], "mumax": [], "Curr": [], "N": []}
+            for ns in range(1, self.nstat + 1):
+                self._ode_pop["npast_" + str(ns)] = []
+                self._ode_pop["mu_" + str(ns)] = []
+                self._ode_pop["f_" + str(ns)] = []
+                self._ode_pop["vef_" + str(ns)] = []
+                self._ode_pop["vt_" + str(ns)] = []
+                if self.mode == "fixed":
                     self._ode_pop["Lam_" + str(ns)] = []
-                    self._ode_pop["mu_" + str(ns)] = []
-                    self._ode_pop["f_" + str(ns)] = []
-                    self._ode_pop["vef_" + str(ns)] = []
-                    self._ode_pop["vt_" + str(ns)] = []
         return self._ode_pop
 
     def create_members(self, num_of_members: int, parameter_dic: dict):
@@ -176,7 +176,7 @@ class pneumoinfer:
 
         Method to run the corresponding ode system for the
         defined occupation model. The system generates
-        all outputs through the statemem.ode_output dictionary.
+        all outputs through the pneumoinfer.ode_output dictionary.
 
         Args:
         runtime
@@ -346,7 +346,7 @@ class pneumoinfer:
 
         Method to run a set of simulated realisations of the defined 
         occupation model. The simulation stores all outputs through 
-        the statemem.sim_output dictionary.
+        the pneumoinfer.sim_output dictionary.
 
         Args:
         num_of_reals
