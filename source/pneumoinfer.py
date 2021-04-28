@@ -21,7 +21,7 @@ import scipy.special as spec
 
 # Initialise the 'pneumoinfer' method class
 class pneumoinfer:
-    def __init__(self, model_mode: str, num_of_states: int):
+    def __init__(self, num_of_states: int):
         """
 
         pneumoinfer - An all-in-one inference and stochastic 
@@ -29,12 +29,6 @@ class pneumoinfer:
         memory which records previous state occupations.
 
         Args:
-        model_mode
-            The mode for the modelling approach. Choose from: 
-                'fixed': the occupation rates are independent 
-                of the ensemble state
-                'vary': the occupation rates depend on the 
-                ensemble state
         num_of_states
             The effective number of states (separate states) 
             that each individual member can exist in. This does 
@@ -43,11 +37,11 @@ class pneumoinfer:
         """
 
         # Set initialisation variables of the class
-        self.mode = model_mode
         self.nstat = num_of_states
         self.nind = 0
         self._pop = None
         self._ode_pop = None
+        self._cont_mat = None
 
     @property
     def pop(self):
@@ -64,9 +58,9 @@ class pneumoinfer:
                 self._pop["vef_" + str(ns)] = []
                 # The time of vaccination against this state
                 self._pop["vt_" + str(ns)] = []
-                if self.mode == "fixed":
-                    # The occupation rate of this state
-                    self._pop["Lam_" + str(ns)] = []
+                # The occupation rate of this state 
+                # (or its minimum in "vary" mode)
+                self._pop["Lam_" + str(ns)] = []
         return self._pop
 
     @property
@@ -79,9 +73,24 @@ class pneumoinfer:
                 self._ode_pop["f_" + str(ns)] = []
                 self._ode_pop["vef_" + str(ns)] = []
                 self._ode_pop["vt_" + str(ns)] = []
-                if self.mode == "fixed":
-                    self._ode_pop["Lam_" + str(ns)] = []
+                self._ode_pop["Lam_" + str(ns)] = []
         return self._ode_pop
+
+    @property
+    def cont_mat(self):
+        """
+
+        Including or not including contact matrix determines the mode for the 
+        modelling approach. If self.mode = "fixed", the occupation rates are 
+        independent of the ensemble state. If self.mode = "vary", the occupation 
+        rates depend on the ensemble state.
+
+        """
+        if self._cont_mat is None:
+            self.mode = "fixed"
+        else:
+            self.mode = "vary"
+        return self._cont_mat
 
     def create_members(self, num_of_members: int, parameter_dic: dict):
         """
@@ -94,82 +103,110 @@ class pneumoinfer:
 
         parameter_dic
             A dictionary of parameters and parameter arrays where the keys are:
+
                 'Curr'  : The state of this group of individuals [Mandatory]
                 (int where the null state is 0 and the remaining states are
                 positive integers up to the value set for 'num_of_states' at 
                 class init)
+
                 'npast' : Past number of occupations for each state [Mandatory]
                 (array of length length 'num_of_states' at class init)
-                'Lam'  : The occupation rate for each state [Mandatory]
-                array of length length 'num_of_states' at class init)
+                
+                'Lam'  : The occupation rate for each state if no contact
+                matrix is included OR the minimum occupation rate for this
+                state if there is a contact matrix included [Mandatory]
+                (array of length length 'num_of_states' at class init)
+
                 'mu'   : The recovery rate from each state [Mandatory]
                 (array of length length 'num_of_states' at class init)
+
                 'f'   : The relative competitiveness of each state [Mandatory]
                 (array of length length 'num_of_states' at class init)
+
                 'eps'  : Nonspecific memory (changes recovery rate) [Mandatory]
                 (positive float)
+
                 'sig'  : Specific memory (changes occupation rate) [Mandatory]
                 (positive float)
+
                 'mumax' : Maximum recovery rate from any state [Mandatory]
                 (positive float)
+
                 'vef'  : Vaccine efficacy for each state (when applied) [Optional]
                 (array of length length 'num_of_states' at class init)
+
                 'vt'   : Vaccination times for each state [Optional]
-                (array of length length 'num_of_states' at class init) 
+                (array of length length 'num_of_states' at class init)
+
+                'cind' : 0-axis index of this group of individuals with 
+                respect to the contact matrix (if included) [Optional]
+                (int with max value less than the 0-axis length of the 
+                contact matrix)
 
         """
 
-        # If the occupation rates are independent of the ensemble
-        # state then setup the appropriate dictionaries
-        if self.mode == "fixed":
+        # Initialise the contact matrix property (must be included
+        # before creating a population) and then add an index to it 
+        # in the population definition, if necessary
+        cont_mat = self.cont_mat
+        if self.mode == "vary":
+            if self._pop is None:
+                pop = self.pop
+                self._pop["cind"] = []
+            if self._ode_pop is None:
+                ode_pop = self.ode_pop
+                self._ode_pop["cind"] = []
+            cind = parameter_dic["cind"]
+            self.pop["cind"] += [cind] * num_of_members
+            self.ode_pop["cind"] += [cind]
 
-            # Extract the parameters and current state from the input
-            vefs, vts = np.zeros(self.nstat), -np.ones(self.nstat)
-            Curr, npasts, Lams = (
-                parameter_dic["Curr"],
-                parameter_dic["npast"],
-                parameter_dic["Lam"],
-            )
-            mus, fs, sig = parameter_dic["mu"], parameter_dic["f"], parameter_dic["sig"]
-            eps, mumax = parameter_dic["eps"], parameter_dic["mumax"]
-            if "vef" in parameter_dic:
-                vefs = parameter_dic["vef"]
-            if "vt" in parameter_dic:
-                vts = parameter_dic["vt"]
+        # Extract the parameters and current state from the input
+        vefs, vts = np.zeros(self.nstat), -np.ones(self.nstat)
+        Curr, npasts, Lams = (
+            parameter_dic["Curr"],
+            parameter_dic["npast"],
+            parameter_dic["Lam"],
+        )
+        mus, fs, sig = parameter_dic["mu"], parameter_dic["f"], parameter_dic["sig"]
+        eps, mumax = parameter_dic["eps"], parameter_dic["mumax"]
+        if "vef" in parameter_dic:
+            vefs = parameter_dic["vef"]
+        if "vt" in parameter_dic:
+            vts = parameter_dic["vt"]
 
-            # Add to the total number of individuals in the ensemble
-            self.nind += num_of_members
+        # Add to the total number of individuals in the ensemble
+        self.nind += num_of_members
 
-            # Set the memory parameters of this ensemble group
-            self.pop["sig"] += [sig] * num_of_members
-            self.pop["eps"] += [eps] * num_of_members
-            self.pop["mumax"] += [mumax] * num_of_members
-            self.ode_pop["sig"] += [sig]
-            self.ode_pop["eps"] += [eps]
-            self.ode_pop["mumax"] += [mumax]
+        # Set the memory parameters of this ensemble group
+        self.pop["sig"] += [sig] * num_of_members
+        self.pop["eps"] += [eps] * num_of_members
+        self.pop["mumax"] += [mumax] * num_of_members
+        self.ode_pop["sig"] += [sig]
+        self.ode_pop["eps"] += [eps]
+        self.ode_pop["mumax"] += [mumax]
 
-            # Set the current state uniformally across this ensemble group
-            self.pop["Curr"] += [Curr] * num_of_members
-            self.ode_pop["Curr"] += [Curr]
+        # Set the current state uniformally across this ensemble group
+        self.pop["Curr"] += [Curr] * num_of_members
+        self.ode_pop["Curr"] += [Curr]
 
-            # Set the ensemble size for this group in the ODE system
-            self.ode_pop["N"] += [num_of_members]
+        # Set the ensemble size for this group in the ODE system
+        self.ode_pop["N"] += [num_of_members]
 
-            # Loop over the number of states to create all of the dictionary
-            # columns associated to this group of individuals
-            for ns in range(1, self.nstat + 1):
-                self.pop["npast_" + str(ns)] += [npasts[ns - 1]] * num_of_members
-                self.pop["Lam_" + str(ns)] += [Lams[ns - 1]] * num_of_members
-                self.pop["mu_" + str(ns)] += [mus[ns - 1]] * num_of_members
-                self.pop["f_" + str(ns)] += [fs[ns - 1]] * num_of_members
-                self.pop["vef_" + str(ns)] += [vefs[ns - 1]] * num_of_members
-                self.pop["vt_" + str(ns)] += [vts[ns - 1]] * num_of_members
-                self.ode_pop["npast_" + str(ns)] += [npasts[ns - 1]]
-                self.ode_pop["Lam_" + str(ns)] += [Lams[ns - 1]]
-                self.ode_pop["mu_" + str(ns)] += [mus[ns - 1]]
-                self.ode_pop["f_" + str(ns)] += [fs[ns - 1]]
-                self.ode_pop["vef_" + str(ns)] += [vefs[ns - 1]]
-                self.ode_pop["vt_" + str(ns)] += [vts[ns - 1]]
+        # Loop over the number of states to create all of the dictionary
+        # columns associated to this group of individuals
+        for ns in range(1, self.nstat + 1):
+            self.pop["npast_" + str(ns)] += [npasts[ns - 1]] * num_of_members
+            self.pop["Lam_" + str(ns)] += [Lams[ns - 1]] * num_of_members
+            self.pop["mu_" + str(ns)] += [mus[ns - 1]] * num_of_members
+            self.pop["f_" + str(ns)] += [fs[ns - 1]] * num_of_members
+            self.pop["vef_" + str(ns)] += [vefs[ns - 1]] * num_of_members
+            self.pop["vt_" + str(ns)] += [vts[ns - 1]] * num_of_members
+            self.ode_pop["npast_" + str(ns)] += [npasts[ns - 1]]
+            self.ode_pop["Lam_" + str(ns)] += [Lams[ns - 1]]
+            self.ode_pop["mu_" + str(ns)] += [mus[ns - 1]]
+            self.ode_pop["f_" + str(ns)] += [fs[ns - 1]]
+            self.ode_pop["vef_" + str(ns)] += [vefs[ns - 1]]
+            self.ode_pop["vt_" + str(ns)] += [vts[ns - 1]]
 
     def run_ode(self, runtime: float, timescale: float):
         """
