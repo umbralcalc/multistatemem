@@ -80,7 +80,7 @@ class pneumoinfer:
     def cont_mat(self):
         """
 
-        Including or not including contact matrix determines the mode for the 
+        Including or not including a contact matrix determines the mode for the 
         modelling approach. If self.mode = "fixed", the occupation rates are 
         independent of the ensemble state. If self.mode = "vary", the occupation 
         rates depend on the ensemble state.
@@ -406,288 +406,301 @@ class pneumoinfer:
         # Add the endpoint to the specified output
         time_snaps.append(runtime)
 
+        # Extract the parameters in a form for faster simulation
+        sigs, epss, mumaxs, Currs = (
+            np.asarray(self.pop["sig"]),
+            np.asarray(self.pop["eps"]),
+            np.asarray(self.pop["mumax"]),
+        np.asarray(self.pop["Curr"]),
+        )
+        npasts, Lams, mus, fs, vefs, vts = [], [], [], [], [], []
+        for ns in range(1, self.nstat + 1):
+            npasts.append(self.pop["npast_" + str(ns)])
+            Lams.append(self.pop["Lam_" + str(ns)])
+            mus.append(self.pop["mu_" + str(ns)])
+            fs.append(self.pop["f_" + str(ns)])
+            vefs.append(self.pop["vef_" + str(ns)])
+            vts.append(self.pop["vt_" + str(ns)])
+        npasts, Lams, mus, fs = (
+            np.asarray(npasts),
+            np.asarray(Lams),
+            np.asarray(mus),
+            np.asarray(fs),
+        )
+        vefs, vts = np.asarray(vefs), np.asarray(vts)
+
+        # Create higher-dimensional data structures for faster
+        # simulations - index ordering is typically:
+        # [state,individual,realisation]
+        Currs_members = np.tensordot(Currs, np.ones(num_of_reals), axes=0)
+        reals_Currs = np.tensordot(np.ones(self.nstat), Currs_members, axes=0)
+        reals_sigs = np.tensordot(
+            np.ones(self.nstat),
+            np.tensordot(sigs, np.ones(num_of_reals), axes=0),
+            axes=0,
+        )
+        reals_epss = np.tensordot(
+            np.ones(self.nstat),
+            np.tensordot(epss, np.ones(num_of_reals), axes=0),
+            axes=0,
+        )
+        reals_mumaxs = np.tensordot(
+            np.ones(self.nstat),
+            np.tensordot(mumaxs, np.ones(num_of_reals), axes=0),
+            axes=0,
+        )
+        reals_npasts = np.tensordot(npasts, np.ones(num_of_reals), axes=0)
+        reals_Lams = np.tensordot(Lams, np.ones(num_of_reals), axes=0)
+        reals_mus = np.tensordot(mus, np.ones(num_of_reals), axes=0)
+        reals_vts = np.tensordot(vts, np.ones(num_of_reals), axes=0)
+        reals_vefs = np.tensordot(vefs, np.ones(num_of_reals), axes=0)
+        reals_vefs_deliv = np.zeros((self.nstat, self.nind, num_of_reals))
+
+        # Create output array storage for fast updates
+        Curr_store = np.zeros((len(time_snaps), self.nind, num_of_reals))
+        npast_store = np.zeros((len(time_snaps), self.nstat, num_of_reals))
+
         # If the occupation rates are independent of
         # the ensemble state then run this simulation type
         if self.mode == "fixed":
+            def col_rates_func(r_Currs, r_npasts, r_vefs_deliv):
+                return reals_Lams * np.minimum(
+                    ((r_npasts == 0) + (reals_sigs * (r_npasts > 0))),
+                    1.0 - r_vefs_deliv,
+                )
+        # If the occupation rates are instead dependent on
+        # the ensemble state then run this simulation type
+        if self.mode == "vary":
+            def col_rates_func(r_Currs, r_npasts, r_vefs_deliv):
+                reals_contact_Lams = reals_Lams + (
+                    ###
+                )
+                return reals_contact_Lams * np.minimum(
+                    ((r_npasts == 0) + (reals_sigs * (r_npasts > 0))),
+                    1.0 - r_vefs_deliv,
+                )
 
-            # Extract the parameters in a form for faster simulation
-            sigs, epss, mumaxs, Currs = (
-                np.asarray(self.pop["sig"]),
-                np.asarray(self.pop["eps"]),
-                np.asarray(self.pop["mumax"]),
-                np.asarray(self.pop["Curr"]),
-            )
-            npasts, Lams, mus, fs, vefs, vts = [], [], [], [], [], []
-            for ns in range(1, self.nstat + 1):
-                npasts.append(self.pop["npast_" + str(ns)])
-                Lams.append(self.pop["Lam_" + str(ns)])
-                mus.append(self.pop["mu_" + str(ns)])
-                fs.append(self.pop["f_" + str(ns)])
-                vefs.append(self.pop["vef_" + str(ns)])
-                vts.append(self.pop["vt_" + str(ns)])
-            npasts, Lams, mus, fs = (
-                np.asarray(npasts),
-                np.asarray(Lams),
-                np.asarray(mus),
-                np.asarray(fs),
-            )
-            vefs, vts = np.asarray(vefs), np.asarray(vts)
+        # Initialise the loop over realisations in time
+        times = np.zeros(num_of_reals)
+        slowest_time = 0.0
+        still_running = np.ones(num_of_reals)
+        while slowest_time < runtime:
 
-            # Create higher-dimensional data structures for faster
-            # simulations - index ordering is typically:
-            # [state,individual,realisation]
-            Currs_members = np.tensordot(Currs, np.ones(num_of_reals), axes=0)
-            reals_Currs = np.tensordot(np.ones(self.nstat), Currs_members, axes=0)
-            reals_sigs = np.tensordot(
+            # Store the previous times before step
+            previous_times = times.copy()
+
+            # Change the indicator for the realisations which
+            # have ended
+            still_running[times > runtime] = 0.0
+
+            # Draw the next point in time
+            timestep = np.random.exponential(timescale, size=num_of_reals)
+            times += still_running * timestep
+
+            # Find the slowest realisation
+            slowest_time = np.ndarray.min(times)
+
+            # Draw event realisations for each individual member
+            # of the ensemble
+            events = np.random.uniform(size=(self.nind, num_of_reals))
+
+            # Work out whether vaccinations are due
+            due_mask = (
+                np.tensordot(np.ones((self.nstat, self.nind)), times, axes=0)
+                >= reals_vts
+            ) * (reals_vts != -1.0)
+            reals_vefs_deliv[due_mask] = reals_vefs[due_mask]
+
+            # Create cumulative rate sums that are consistent with
+            # the present state
+            sum_reals_npasts = np.tensordot(
+                np.ones(self.nstat), np.sum(reals_npasts, axis=0), axes=0
+            )
+            rec_rates = reals_mumaxs + (
+                (reals_mus - reals_mumaxs) * np.exp(-reals_epss * sum_reals_npasts)
+            )
+            col_rates = col_rates_func(reals_Currs, reals_npasts, reals_vefs_deliv)
+            reals_fs = np.tensordot(
                 np.ones(self.nstat),
-                np.tensordot(sigs, np.ones(num_of_reals), axes=0),
+                np.diagonal(fs[Currs_members.astype(int) - 1], axis1=0, axis2=2).T,
                 axes=0,
             )
-            reals_epss = np.tensordot(
-                np.ones(self.nstat),
-                np.tensordot(epss, np.ones(num_of_reals), axes=0),
-                axes=0,
+            ccl_rates = col_rates * reals_fs
+            rec_rates[
+                (reals_Currs == 0)
+                | (
+                reals_Currs
+                    != np.tensordot(
+                        np.arange(1, self.nstat + 1, 1),
+                        np.ones((self.nind, num_of_reals)),
+                        axes=0,
+                    )
+                )
+            ] = 0.0
+            col_rates[(reals_Currs > 0)] = 0.0
+            ccl_rates[
+                (reals_Currs == 0)
+                | (
+                    reals_Currs
+                    == np.tensordot(
+                        np.arange(1, self.nstat + 1, 1),
+                        np.ones((self.nind, num_of_reals)),
+                        axes=0,
+                    )
+                )
+            ] = 0.0
+            cumsum_rec_rates = np.cumsum(rec_rates, axis=0)
+            cumsum_col_rates = np.cumsum(col_rates, axis=0)
+            cumsum_ccl_rates = np.cumsum(ccl_rates, axis=0)
+
+            # Store the previous states before they are changed
+            previous_Currs_members = Currs_members.copy()
+
+            # Use the event realisations and the cumulative rate
+            # sums to evaluate the next state transitions
+            reals_tot_rate_sums = (
+                np.tensordot(
+                    np.ones((self.nstat, self.nind)), 1.0 / timestep, axes=0
+                )
+                + (
+                    np.tensordot(np.ones(self.nstat), cumsum_rec_rates[-1], axes=0)
+                    * (reals_Currs > 0)
+                )
+                + (
+                    np.tensordot(np.ones(self.nstat), cumsum_col_rates[-1], axes=0)
+                    * (reals_Currs == 0)
+                )
+                + (
+                    np.tensordot(np.ones(self.nstat), cumsum_ccl_rates[-1], axes=0)
+                    * (reals_Currs > 0)
+                )
             )
-            reals_mumaxs = np.tensordot(
-                np.ones(self.nstat),
-                np.tensordot(mumaxs, np.ones(num_of_reals), axes=0),
-                axes=0,
-            )
-            reals_npasts = np.tensordot(npasts, np.ones(num_of_reals), axes=0)
-            reals_Lams = np.tensordot(Lams, np.ones(num_of_reals), axes=0)
-            reals_mus = np.tensordot(mus, np.ones(num_of_reals), axes=0)
-            reals_vts = np.tensordot(vts, np.ones(num_of_reals), axes=0)
-            reals_vefs = np.tensordot(vefs, np.ones(num_of_reals), axes=0)
-            reals_vefs_deliv = np.zeros((self.nstat, self.nind, num_of_reals))
-
-            # Create output array storage for fast updates
-            Curr_store = np.zeros((len(time_snaps), self.nind, num_of_reals))
-            npast_store = np.zeros((len(time_snaps), self.nstat, num_of_reals))
-
-            # Initialise the loop over realisations in time
-            times = np.zeros(num_of_reals)
-            slowest_time = 0.0
-            still_running = np.ones(num_of_reals)
-            while slowest_time < runtime:
-
-                # Store the previous times before step
-                previous_times = times.copy()
-
-                # Change the indicator for the realisations which
-                # have ended
-                still_running[times > runtime] = 0.0
-
-                # Draw the next point in time
-                timestep = np.random.exponential(timescale, size=num_of_reals)
-                times += still_running * timestep
-
-                # Find the slowest realisation
-                slowest_time = np.ndarray.min(times)
-
-                # Draw event realisations for each individual member
-                # of the ensemble
-                events = np.random.uniform(size=(self.nind, num_of_reals))
-
-                # Work out whether vaccinations are due
-                due_mask = (
-                    np.tensordot(np.ones((self.nstat, self.nind)), times, axes=0)
-                    >= reals_vts
-                ) * (reals_vts != -1.0)
-                reals_vefs_deliv[due_mask] = reals_vefs[due_mask]
-
-                # Create cumulative rate sums that are consistent with
-                # the present state
-                sum_reals_npasts = np.tensordot(
-                    np.ones(self.nstat), np.sum(reals_npasts, axis=0), axes=0
-                )
-                rec_rates = reals_mumaxs + (
-                    (reals_mus - reals_mumaxs) * np.exp(-reals_epss * sum_reals_npasts)
-                )
-                col_rates = reals_Lams * np.minimum(
-                    ((reals_npasts == 0) + (reals_sigs * (reals_npasts > 0))),
-                    1.0 - reals_vefs_deliv,
-                )
-                reals_fs = np.tensordot(
-                    np.ones(self.nstat),
-                    np.diagonal(fs[Currs_members.astype(int) - 1], axis1=0, axis2=2).T,
-                    axes=0,
-                )
-                ccl_rates = col_rates * reals_fs
-                rec_rates[
-                    (reals_Currs == 0)
-                    | (
-                        reals_Currs
-                        != np.tensordot(
-                            np.arange(1, self.nstat + 1, 1),
-                            np.ones((self.nind, num_of_reals)),
-                            axes=0,
-                        )
-                    )
-                ] = 0.0
-                col_rates[(reals_Currs > 0)] = 0.0
-                ccl_rates[
-                    (reals_Currs == 0)
-                    | (
-                        reals_Currs
-                        == np.tensordot(
-                            np.arange(1, self.nstat + 1, 1),
-                            np.ones((self.nind, num_of_reals)),
-                            axes=0,
-                        )
-                    )
-                ] = 0.0
-                cumsum_rec_rates = np.cumsum(rec_rates, axis=0)
-                cumsum_col_rates = np.cumsum(col_rates, axis=0)
-                cumsum_ccl_rates = np.cumsum(ccl_rates, axis=0)
-
-                # Store the previous states before they are changed
-                previous_Currs_members = Currs_members.copy()
-
-                # Use the event realisations and the cumulative rate
-                # sums to evaluate the next state transitions
-                reals_tot_rate_sums = (
-                    np.tensordot(
-                        np.ones((self.nstat, self.nind)), 1.0 / timestep, axes=0
-                    )
-                    + (
-                        np.tensordot(np.ones(self.nstat), cumsum_rec_rates[-1], axes=0)
-                        * (reals_Currs > 0)
-                    )
-                    + (
-                        np.tensordot(np.ones(self.nstat), cumsum_col_rates[-1], axes=0)
-                        * (reals_Currs == 0)
-                    )
-                    + (
-                        np.tensordot(np.ones(self.nstat), cumsum_ccl_rates[-1], axes=0)
-                        * (reals_Currs > 0)
-                    )
-                )
-                reals_events = np.tensordot(np.ones(self.nstat), events, axes=0)
-                Currs_members[
-                    np.tensordot(np.ones(self.nind), still_running, axes=0) == 1.0
-                ] = (
-                    0
-                    + np.sum(
-                        np.tensordot(
-                            np.arange(1, self.nstat + 1, 1),
-                            np.ones((self.nind, num_of_reals)),
-                            axes=0,
-                        )
-                        * (
-                            (
-                                (
-                                    np.append(
-                                        np.zeros((1, self.nind, num_of_reals)),
-                                        cumsum_col_rates[:-1],
-                                        axis=0,
-                                    )
-                                    / reals_tot_rate_sums
-                                    < reals_events
-                                )
-                                & (
-                                    reals_events
-                                    <= cumsum_col_rates / reals_tot_rate_sums
-                                )
-                            )
-                            + (
-                                (
-                                    np.append(
-                                        np.zeros((1, self.nind, num_of_reals)),
-                                        cumsum_ccl_rates[:-1],
-                                        axis=0,
-                                    )
-                                    / reals_tot_rate_sums
-                                    < reals_events
-                                )
-                                & (
-                                    reals_events
-                                    <= cumsum_ccl_rates / reals_tot_rate_sums
-                                )
-                            )
-                        ),
-                        axis=0,
-                    )
-                    + Currs_members
-                    * (
-                        (cumsum_ccl_rates[-1] + cumsum_rec_rates[-1])
-                        / reals_tot_rate_sums[0]
-                        < events
-                    )
-                )[
-                    np.tensordot(np.ones(self.nind), still_running, axes=0) == 1.0
-                ]
-
-                # Update the number of past occupations of each individual
-                # to match the new states
-                reals_Currs = np.tensordot(np.ones(self.nstat), Currs_members, axes=0)
-                previous_reals_Currs = np.tensordot(
-                    np.ones(self.nstat), previous_Currs_members, axes=0
-                )
-                reals_npasts = reals_npasts + (
-                    (reals_Currs != previous_reals_Currs) & (reals_Currs != 0)
-                ) * (
+            reals_events = np.tensordot(np.ones(self.nstat), events, axes=0)
+            Currs_members[
+                np.tensordot(np.ones(self.nind), still_running, axes=0) == 1.0
+            ] = (
+                0
+                + np.sum(
                     np.tensordot(
                         np.arange(1, self.nstat + 1, 1),
                         np.ones((self.nind, num_of_reals)),
                         axes=0,
                     )
-                    == reals_Currs
+                    * (
+                        (
+                            (
+                                np.append(
+                                    np.zeros((1, self.nind, num_of_reals)),
+                                    cumsum_col_rates[:-1],
+                                    axis=0,
+                                )
+                                / reals_tot_rate_sums
+                                < reals_events
+                            )
+                            & (
+                                reals_events
+                                <= cumsum_col_rates / reals_tot_rate_sums
+                            )
+                        )
+                        + (
+                            (
+                                np.append(
+                                    np.zeros((1, self.nind, num_of_reals)),
+                                    cumsum_ccl_rates[:-1],
+                                    axis=0,
+                                )
+                                / reals_tot_rate_sums
+                                < reals_events
+                            )
+                            & (
+                                reals_events
+                                <= cumsum_ccl_rates / reals_tot_rate_sums
+                            )
+                        )
+                    ),
+                    axis=0,
                 )
+                + Currs_members
+                * (
+                    (cumsum_ccl_rates[-1] + cumsum_rec_rates[-1])
+                    / reals_tot_rate_sums[0]
+                    < events
+                )
+            )[
+                np.tensordot(np.ones(self.nind), still_running, axes=0) == 1.0
+            ]
 
-                # Use the previous times and the time_snaps list to append
-                # output with relevant information
-                Curr_store += (
-                    (
-                        np.tensordot(
-                            np.ones((len(time_snaps), self.nind)), times, axes=0
-                        )
-                        > np.tensordot(
-                            np.asarray(time_snaps),
-                            np.ones((self.nind, num_of_reals)),
-                            axes=0,
-                        )
-                    )
-                    * (
-                        np.tensordot(
-                            np.asarray(time_snaps),
-                            np.ones((self.nind, num_of_reals)),
-                            axes=0,
-                        )
-                        >= np.tensordot(
-                            np.ones((len(time_snaps), self.nind)),
-                            previous_times,
-                            axes=0,
-                        )
-                    )
-                    * np.tensordot(np.ones(len(time_snaps)), Currs_members, axes=0)
+            # Update the number of past occupations of each individual
+            # to match the new states
+            reals_Currs = np.tensordot(np.ones(self.nstat), Currs_members, axes=0)
+            previous_reals_Currs = np.tensordot(
+                np.ones(self.nstat), previous_Currs_members, axes=0
+            )
+            reals_npasts = reals_npasts + (
+                (reals_Currs != previous_reals_Currs) & (reals_Currs != 0)
+            ) * (
+                np.tensordot(
+                    np.arange(1, self.nstat + 1, 1),
+                    np.ones((self.nind, num_of_reals)),
+                    axes=0,
                 )
-                npast_store += (
-                    (
-                        np.tensordot(
-                            np.ones((len(time_snaps), self.nstat)), times, axes=0
-                        )
-                        > np.tensordot(
-                            np.asarray(time_snaps),
-                            np.ones((self.nstat, num_of_reals)),
-                            axes=0,
-                        )
+                == reals_Currs
+            )
+
+            # Use the previous times and the time_snaps list to append
+            # output with relevant information
+            Curr_store += (
+                (
+                    np.tensordot(
+                        np.ones((len(time_snaps), self.nind)), times, axes=0
                     )
-                    * (
-                        np.tensordot(
-                            np.asarray(time_snaps),
-                            np.ones((self.nstat, num_of_reals)),
-                            axes=0,
-                        )
-                        >= np.tensordot(
-                            np.ones((len(time_snaps), self.nstat)),
-                            previous_times,
-                            axes=0,
-                        )
-                    )
-                    * np.tensordot(
-                        np.ones(len(time_snaps)), np.sum(reals_npasts, axis=1), axes=0
+                    > np.tensordot(
+                        np.asarray(time_snaps),
+                        np.ones((self.nind, num_of_reals)),
+                        axes=0,
                     )
                 )
+                * (
+                    np.tensordot(
+                        np.asarray(time_snaps),
+                        np.ones((self.nind, num_of_reals)),
+                        axes=0,
+                    )
+                    >= np.tensordot(
+                        np.ones((len(time_snaps), self.nind)),
+                        previous_times,
+                        axes=0,
+                    )
+                )
+                * np.tensordot(np.ones(len(time_snaps)), Currs_members, axes=0)
+            )
+            npast_store += (
+                (
+                    np.tensordot(
+                        np.ones((len(time_snaps), self.nstat)), times, axes=0
+                    )
+                    > np.tensordot(
+                        np.asarray(time_snaps),
+                        np.ones((self.nstat, num_of_reals)),
+                        axes=0,
+                    )
+                )
+                * (
+                    np.tensordot(
+                        np.asarray(time_snaps),
+                        np.ones((self.nstat, num_of_reals)),
+                        axes=0,
+                    )
+                    >= np.tensordot(
+                        np.ones((len(time_snaps), self.nstat)),
+                        previous_times,
+                        axes=0,
+                    )
+                )
+                * np.tensordot(
+                    np.ones(len(time_snaps)), np.sum(reals_npasts, axis=1), axes=0
+                )
+            )
 
             # Create simulation output
             self.sim_output = {
