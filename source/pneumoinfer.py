@@ -224,157 +224,176 @@ class pneumoinfer:
 
         """
 
+        # Extract the parameters in a form for faster simulation
+        Ns = np.asarray(self.ode_pop["N"])
+        num_of_groups = len(Ns)
+        sigs, epss, mumaxs, Currs = (
+            np.asarray(self.ode_pop["sig"]),
+            np.asarray(self.ode_pop["eps"]),
+            np.asarray(self.ode_pop["mumax"]),
+            np.asarray(self.ode_pop["Curr"]),
+        )
+        npasts, Lams, mus, fs, vefs, vts = [], [], [], [], [], []
+        for ns in range(1, self.nstat + 1):
+            npasts.append(self.ode_pop["npast_" + str(ns)])
+            Lams.append(self.ode_pop["Lam_" + str(ns)])
+            mus.append(self.ode_pop["mu_" + str(ns)])
+            fs.append(self.ode_pop["f_" + str(ns)])
+            vefs.append(self.ode_pop["vef_" + str(ns)])
+            vts.append(self.ode_pop["vt_" + str(ns)])
+        npasts, Lams, mus, fs = (
+            np.asarray(npasts),
+            np.asarray(Lams),
+            np.asarray(mus),
+            np.asarray(fs),
+        )
+        vefs, vts = np.asarray(vefs), np.asarray(vts)
+
+        # Create higher-dimensional data structures for faster
+        # ode integration - index ordering is typically: [state,group]
+        groups_Currs = np.tensordot(np.ones(self.nstat), Currs, axes=0)
+        groups_sigs = np.tensordot(np.ones(self.nstat), sigs, axes=0)
+        groups_epss = np.tensordot(np.ones(self.nstat), epss, axes=0)
+        groups_mumaxs = np.tensordot(np.ones(self.nstat), mumaxs, axes=0)
+        groups_npasts, groups_Lams, groups_fs, groups_mus = npasts, Lams, fs, mus
+        groups_vts, groups_vefs = vts, vefs
+        groups_vefs_deliv = np.zeros((self.nstat, num_of_groups))
+
+        # Get the contact matrix if it exists
+        cont_mat = self.cont_mat
+
         # If the occupation rates are independent of the ensemble
         # state then run this ode system type
         if self.mode == "fixed":
+            def Lams_function(p, groups_Lams):
+                return groups_Lams
 
-            # Extract the parameters in a form for faster simulation
-            Ns = np.asarray(self.ode_pop["N"])
-            num_of_groups = len(Ns)
-            sigs, epss, mumaxs, Currs = (
-                np.asarray(self.ode_pop["sig"]),
-                np.asarray(self.ode_pop["eps"]),
-                np.asarray(self.ode_pop["mumax"]),
-                np.asarray(self.ode_pop["Curr"]),
+        # If the occupation rates are dependent on the ensemble
+        # state then run this ode system type instead
+        if self.mode == "vary":
+            cinds = np.asarray(self.ode_pop["cind"])
+            ind_contact = []
+            for ci in cinds:
+                ind_contact.append(cont_mat[ci][cinds])
+            ind_contact = np.asarray(ind_contact)
+            totN = np.sum(Ns)
+            def Lams_function(p, groups_Lams):
+                contp = np.tensordot(ind_contact, p, axes=([1],[1])).swapaxes(0, 1)
+                return groups_Lams + (contp * Ns / totN)
+
+        # Define a function which takes the ode system forward
+        # in time by a step
+        def next_step(qpn, t, dt=timescale):
+            qpn_new = qpn
+            q, p, n = (
+                qpn[0],
+                qpn[1 : self.nstat + 1],
+                qpn[self.nstat + 1 : 2 * self.nstat + 1],
             )
-            npasts, Lams, mus, fs, vefs, vts = [], [], [], [], [], []
-            for ns in range(1, self.nstat + 1):
-                npasts.append(self.ode_pop["npast_" + str(ns)])
-                Lams.append(self.ode_pop["Lam_" + str(ns)])
-                mus.append(self.ode_pop["mu_" + str(ns)])
-                fs.append(self.ode_pop["f_" + str(ns)])
-                vefs.append(self.ode_pop["vef_" + str(ns)])
-                vts.append(self.ode_pop["vt_" + str(ns)])
-            npasts, Lams, mus, fs = (
-                np.asarray(npasts),
-                np.asarray(Lams),
-                np.asarray(mus),
-                np.asarray(fs),
+            due_mask = (t >= groups_vts) * (groups_vts != -1.0)
+            groups_vefs_deliv[due_mask] = groups_vefs[due_mask]
+            gLs = Lams_function(p, groups_Lams)
+            groups_Lams_v = gLs * (1.0 - groups_vefs_deliv)
+            groups_sigsLams_v = np.minimum(
+                groups_sigs * gLs, gLs * (1.0 - groups_vefs_deliv)
             )
-            vefs, vts = np.asarray(vefs), np.asarray(vts)
-
-            # Create higher-dimensional data structures for faster
-            # ode integration - index ordering is typically: [state,group]
-            groups_Currs = np.tensordot(np.ones(self.nstat), Currs, axes=0)
-            groups_sigs = np.tensordot(np.ones(self.nstat), sigs, axes=0)
-            groups_epss = np.tensordot(np.ones(self.nstat), epss, axes=0)
-            groups_mumaxs = np.tensordot(np.ones(self.nstat), mumaxs, axes=0)
-            groups_npasts, groups_Lams, groups_fs, groups_mus = npasts, Lams, fs, mus
-            groups_vts, groups_vefs = vts, vefs
-            groups_vefs_deliv = np.zeros((self.nstat, num_of_groups))
-
-            # Define a function which takes the ode system forward
-            # in time by a step
-            def next_step(qpn, t, dt=timescale):
-                qpn_new = qpn
-                q, p, n = (
-                    qpn[0],
-                    qpn[1 : self.nstat + 1],
-                    qpn[self.nstat + 1 : 2 * self.nstat + 1],
-                )
-                due_mask = (t >= groups_vts) * (groups_vts != -1.0)
-                groups_vefs_deliv[due_mask] = groups_vefs[due_mask]
-                groups_Lams_v = groups_Lams * (1.0 - groups_vefs_deliv)
-                groups_sigsLams_v = np.minimum(
-                    groups_sigs * groups_Lams, groups_Lams * (1.0 - groups_vefs_deliv)
-                )
-                n_new = n + dt * (
-                    (groups_sigsLams_v * np.tensordot(np.ones(self.nstat), q, axes=0))
-                    + (
-                        (
-                            np.tensordot(
-                                np.ones(self.nstat),
-                                np.sum(groups_fs * p, axis=0),
-                                axes=0,
-                            )
-                            - (groups_fs * p)
+            n_new = n + dt * (
+                (groups_sigsLams_v * np.tensordot(np.ones(self.nstat), q, axes=0))
+                + (
+                    (
+                        np.tensordot(
+                            np.ones(self.nstat),
+                            np.sum(groups_fs * p, axis=0),
+                            axes=0,
                         )
-                        * groups_sigsLams_v
+                        - (groups_fs * p)
                     )
+                    * groups_sigsLams_v
                 )
-                F = (groups_Lams_v * np.exp(-n)) + (
-                    groups_sigsLams_v * (1.0 - np.exp(-n))
-                )
-                G = groups_mumaxs + (groups_mus - groups_mumaxs) * np.exp(
-                    np.tensordot(np.ones(self.nstat), np.sum(n, axis=0), axes=0)
-                    * (np.exp(-groups_epss) - 1.0)
-                )
-                q_new = q + dt * (np.sum(G * p, axis=0) - (np.sum(F, axis=0) * q))
-                p_new = p + dt * (
-                    (F * q)
-                    + (
-                        (
-                            np.tensordot(
-                                np.ones(self.nstat),
-                                np.sum(groups_fs * p, axis=0),
-                                axes=0,
-                            )
-                            - (groups_fs * p)
+            )
+            F = (groups_Lams_v * np.exp(-n)) + (
+                groups_sigsLams_v * (1.0 - np.exp(-n))
+            )
+            G = groups_mumaxs + (groups_mus - groups_mumaxs) * np.exp(
+                np.tensordot(np.ones(self.nstat), np.sum(n, axis=0), axes=0)
+                * (np.exp(-groups_epss) - 1.0)
+            )
+            q_new = q + dt * (np.sum(G * p, axis=0) - (np.sum(F, axis=0) * q))
+            p_new = p + dt * (
+                (F * q)
+                + (
+                    (
+                        np.tensordot(
+                            np.ones(self.nstat),
+                            np.sum(groups_fs * p, axis=0),
+                            axes=0,
                         )
-                        * F
+                        - (groups_fs * p)
                     )
-                    - (G * p)
-                    - (
-                        (
-                            np.tensordot(np.ones(self.nstat), np.sum(F, axis=0), axes=0)
-                            - F
-                        )
-                        * groups_fs
-                        * p
+                    * F
+                )
+                - (G * p)
+                - (
+                    (
+                        np.tensordot(np.ones(self.nstat), np.sum(F, axis=0), axes=0)
+                        - F
                     )
+                    * groups_fs
+                    * p
                 )
-                (
-                    qpn_new[0],
-                    qpn_new[1 : self.nstat + 1],
-                    qpn_new[self.nstat + 1 : 2 * self.nstat + 1],
-                ) = (q_new, p_new, n_new)
-                return qpn_new
+            )
+            (
+                qpn_new[0],
+                qpn_new[1 : self.nstat + 1],
+                qpn_new[self.nstat + 1 : 2 * self.nstat + 1],
+            ) = (q_new, p_new, n_new)
+            return qpn_new
 
-            # Define a function which runs the system over the specified
-            # time period
-            def run_system(qpn0, t0, t, dt=timescale):
-                qpn = qpn0
-                steps = int((t - t0) / dt)
-                t = t0
-                rec = []
-                N_weights = np.tensordot(np.ones(2 * self.nstat + 1), Ns, axes=0)
-                for i in range(0, steps):
-                    qpn = next_step(qpn, t, dt)
-                    outp = np.sum(N_weights * qpn, axis=1) / self.nind
-                    t += dt
-                    rec.append(np.append(t, outp))
-                rec = np.asarray(rec)
-                ts, qs, ps, ns = (
-                    rec[:, 0],
-                    rec[:, 1],
-                    rec[:, 2 : self.nstat + 2],
-                    rec[:, self.nstat + 2 : 2 * self.nstat + 2],
-                )
-                return ts, qs, ps, ns
+        # Define a function which runs the system over the specified
+        # time period
+        def run_system(qpn0, t0, t, dt=timescale):
+            qpn = qpn0
+            steps = int((t - t0) / dt)
+            t = t0
+            rec = []
+            N_weights = np.tensordot(np.ones(2 * self.nstat + 1), Ns, axes=0)
+            for i in range(0, steps):
+                qpn = next_step(qpn, t, dt)
+                outp = np.sum(N_weights * qpn, axis=1) / self.nind
+                t += dt
+                rec.append(np.append(t, outp))
+            rec = np.asarray(rec)
+            ts, qs, ps, ns = (
+                rec[:, 0],
+                rec[:, 1],
+                rec[:, 2 : self.nstat + 2],
+                rec[:, self.nstat + 2 : 2 * self.nstat + 2],
+            )
+            return ts, qs, ps, ns
 
-            # Run the system with consistent initial conditions and generate
-            # output dictionary
-            q0 = np.zeros(num_of_groups)
-            p0 = np.zeros((self.nstat, num_of_groups))
-            n0 = groups_npasts
-            q0[Currs == 0] = 1.0
-            p0[
-                groups_Currs
-                == np.tensordot(
-                    np.arange(1, self.nstat + 1, 1), np.ones(num_of_groups), axes=0
-                )
-            ] = 1.0
-            qpn0 = np.zeros((2 * self.nstat + 1, num_of_groups))
-            qpn0[0] = q0
-            qpn0[1 : self.nstat + 1] = p0
-            qpn0[self.nstat + 1 : 2 * self.nstat + 1] = n0
-            t_vals, q_vals, p_vals, n_vals = run_system(qpn0, 0, runtime)
-            self.ode_output = {
-                "time": t_vals,
-                "probNone": q_vals,
-                "probCurr": p_vals,
-                "Expnpast": n_vals,
-            }
+        # Run the system with consistent initial conditions and generate
+        # output dictionary
+        q0 = np.zeros(num_of_groups)
+        p0 = np.zeros((self.nstat, num_of_groups))
+        n0 = groups_npasts
+        q0[Currs == 0] = 1.0
+        p0[
+            groups_Currs
+            == np.tensordot(
+                np.arange(1, self.nstat + 1, 1), np.ones(num_of_groups), axes=0
+            )
+        ] = 1.0
+        qpn0 = np.zeros((2 * self.nstat + 1, num_of_groups))
+        qpn0[0] = q0
+        qpn0[1 : self.nstat + 1] = p0
+        qpn0[self.nstat + 1 : 2 * self.nstat + 1] = n0
+        t_vals, q_vals, p_vals, n_vals = run_system(qpn0, 0, runtime)
+        self.ode_output = {
+            "time": t_vals,
+            "probNone": q_vals,
+            "probCurr": p_vals,
+            "Expnpast": n_vals,
+        }
 
     def run_sim(
         self, num_of_reals: int, runtime: float, timescale: float, time_snaps=[]
