@@ -460,6 +460,9 @@ class pneumoinfer:
         Curr_store = np.zeros((len(time_snaps), self.nind, num_of_reals))
         npast_store = np.zeros((len(time_snaps), self.nstat, num_of_reals))
 
+        # Get the contact matrix if it exists
+        cont_mat = self.cont_mat
+
         # If the occupation rates are independent of
         # the ensemble state then run this simulation type
         if self.mode == "fixed":
@@ -471,9 +474,23 @@ class pneumoinfer:
         # If the occupation rates are instead dependent on
         # the ensemble state then run this simulation type
         if self.mode == "vary":
+            cinds = np.asarray(self.pop["cind"])
+            ind_contact = []
+            for ci in cinds:
+                ind_contact.append(cont_mat[ci][cinds])
+            ind_contact = np.asarray(ind_contact)
+            r_Currs_ref = np.tensordot(
+                np.arange(1, self.nstat+1, 1),
+                np.ones((self.nind, num_of_reals)),
+                axes=0,
+            )
             def col_rates_func(r_Currs, r_npasts, r_vefs_deliv):
                 reals_contact_Lams = reals_Lams + (
-                    ###
+                    np.tensordot(
+                       ind_contact, 
+                       (r_Currs_ref==r_Currs),
+                       axes=([1],[1]),
+                    ).swapaxes(0,1) / float(self.nind)
                 )
                 return reals_contact_Lams * np.minimum(
                     ((r_npasts == 0) + (reals_sigs * (r_npasts > 0))),
