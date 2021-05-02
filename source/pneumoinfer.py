@@ -15,7 +15,6 @@ public repo for a more user-friendly experience.
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import scipy.special as spec
 
 
@@ -45,7 +44,7 @@ class pneumoinfer:
 
     @property
     def pop(self):
-        if self._pop is None:  
+        if self._pop is None:
             self._pop = {"sig": [], "eps": [], "mumax": [], "Curr": []}
             for ns in range(1, self.nstat + 1):
                 # The number of past occupations of this state
@@ -58,7 +57,7 @@ class pneumoinfer:
                 self._pop["vef_" + str(ns)] = []
                 # The time of vaccination against this state
                 self._pop["vt_" + str(ns)] = []
-                # The occupation rate of this state 
+                # The occupation rate of this state
                 # (or its minimum in "vary" mode)
                 self._pop["Lam_" + str(ns)] = []
         return self._pop
@@ -146,7 +145,7 @@ class pneumoinfer:
         """
 
         # Initialise the contact matrix property (must be included
-        # before creating a population) and then add an index to it 
+        # before creating a population) and then add an index to it
         # in the population definition, if necessary
         cont_mat = self.cont_mat
         if self.mode == "vary":
@@ -265,6 +264,7 @@ class pneumoinfer:
         # If the occupation rates are independent of the ensemble
         # state then run this ode system type
         if self.mode == "fixed":
+
             def Lams_function(p, groups_Lams):
                 return groups_Lams
 
@@ -277,8 +277,9 @@ class pneumoinfer:
                 ind_contact.append(cont_mat[ci][cinds])
             ind_contact = np.asarray(ind_contact)
             totN = np.sum(Ns)
+
             def Lams_function(p, groups_Lams):
-                contp = np.tensordot(ind_contact, p, axes=([1],[1])).swapaxes(0, 1)
+                contp = np.tensordot(ind_contact, p, axes=([1], [1])).swapaxes(0, 1)
                 return groups_Lams + (contp * Ns / totN)
 
         # Define a function which takes the ode system forward
@@ -302,18 +303,14 @@ class pneumoinfer:
                 + (
                     (
                         np.tensordot(
-                            np.ones(self.nstat),
-                            np.sum(groups_fs * p, axis=0),
-                            axes=0,
+                            np.ones(self.nstat), np.sum(groups_fs * p, axis=0), axes=0,
                         )
                         - (groups_fs * p)
                     )
                     * groups_sigsLams_v
                 )
             )
-            F = (groups_Lams_v * np.exp(-n)) + (
-                groups_sigsLams_v * (1.0 - np.exp(-n))
-            )
+            F = (groups_Lams_v * np.exp(-n)) + (groups_sigsLams_v * (1.0 - np.exp(-n)))
             G = groups_mumaxs + (groups_mus - groups_mumaxs) * np.exp(
                 np.tensordot(np.ones(self.nstat), np.sum(n, axis=0), axes=0)
                 * (np.exp(-groups_epss) - 1.0)
@@ -324,9 +321,7 @@ class pneumoinfer:
                 + (
                     (
                         np.tensordot(
-                            np.ones(self.nstat),
-                            np.sum(groups_fs * p, axis=0),
-                            axes=0,
+                            np.ones(self.nstat), np.sum(groups_fs * p, axis=0), axes=0,
                         )
                         - (groups_fs * p)
                     )
@@ -334,10 +329,7 @@ class pneumoinfer:
                 )
                 - (G * p)
                 - (
-                    (
-                        np.tensordot(np.ones(self.nstat), np.sum(F, axis=0), axes=0)
-                        - F
-                    )
+                    (np.tensordot(np.ones(self.nstat), np.sum(F, axis=0), axes=0) - F)
                     * groups_fs
                     * p
                 )
@@ -430,7 +422,7 @@ class pneumoinfer:
             np.asarray(self.pop["sig"]),
             np.asarray(self.pop["eps"]),
             np.asarray(self.pop["mumax"]),
-        np.asarray(self.pop["Curr"]),
+            np.asarray(self.pop["Curr"]),
         )
         npasts, Lams, mus, fs, vefs, vts = [], [], [], [], [], []
         for ns in range(1, self.nstat + 1):
@@ -485,11 +477,13 @@ class pneumoinfer:
         # If the occupation rates are independent of
         # the ensemble state then run this simulation type
         if self.mode == "fixed":
+
             def col_rates_func(r_Currs, r_npasts, r_vefs_deliv):
                 return reals_Lams * np.minimum(
                     ((r_npasts == 0) + (reals_sigs * (r_npasts > 0))),
                     1.0 - r_vefs_deliv,
                 )
+
         # If the occupation rates are instead dependent on
         # the ensemble state then run this simulation type
         if self.mode == "vary":
@@ -499,17 +493,17 @@ class pneumoinfer:
                 ind_contact.append(cont_mat[ci][cinds])
             ind_contact = np.asarray(ind_contact)
             r_Currs_ref = np.tensordot(
-                np.arange(1, self.nstat+1, 1),
+                np.arange(1, self.nstat + 1, 1),
                 np.ones((self.nind, num_of_reals)),
                 axes=0,
             )
+
             def col_rates_func(r_Currs, r_npasts, r_vefs_deliv):
                 reals_contact_Lams = reals_Lams + (
                     np.tensordot(
-                       ind_contact, 
-                       (r_Currs_ref==r_Currs),
-                       axes=([1],[1]),
-                    ).swapaxes(0,1) / float(self.nind)
+                        ind_contact, (r_Currs_ref == r_Currs), axes=([1], [1]),
+                    ).swapaxes(0, 1)
+                    / float(self.nind)
                 )
                 return reals_contact_Lams * np.minimum(
                     ((r_npasts == 0) + (reals_sigs * (r_npasts > 0))),
@@ -565,7 +559,7 @@ class pneumoinfer:
             rec_rates[
                 (reals_Currs == 0)
                 | (
-                reals_Currs
+                    reals_Currs
                     != np.tensordot(
                         np.arange(1, self.nstat + 1, 1),
                         np.ones((self.nind, num_of_reals)),
@@ -595,9 +589,7 @@ class pneumoinfer:
             # Use the event realisations and the cumulative rate
             # sums to evaluate the next state transitions
             reals_tot_rate_sums = (
-                np.tensordot(
-                    np.ones((self.nstat, self.nind)), 1.0 / timestep, axes=0
-                )
+                np.tensordot(np.ones((self.nstat, self.nind)), 1.0 / timestep, axes=0)
                 + (
                     np.tensordot(np.ones(self.nstat), cumsum_rec_rates[-1], axes=0)
                     * (reals_Currs > 0)
@@ -633,10 +625,7 @@ class pneumoinfer:
                                 / reals_tot_rate_sums
                                 < reals_events
                             )
-                            & (
-                                reals_events
-                                <= cumsum_col_rates / reals_tot_rate_sums
-                            )
+                            & (reals_events <= cumsum_col_rates / reals_tot_rate_sums)
                         )
                         + (
                             (
@@ -648,10 +637,7 @@ class pneumoinfer:
                                 / reals_tot_rate_sums
                                 < reals_events
                             )
-                            & (
-                                reals_events
-                                <= cumsum_ccl_rates / reals_tot_rate_sums
-                            )
+                            & (reals_events <= cumsum_ccl_rates / reals_tot_rate_sums)
                         )
                     ),
                     axis=0,
@@ -687,9 +673,7 @@ class pneumoinfer:
             # output with relevant information
             Curr_store += (
                 (
-                    np.tensordot(
-                        np.ones((len(time_snaps), self.nind)), times, axes=0
-                    )
+                    np.tensordot(np.ones((len(time_snaps), self.nind)), times, axes=0)
                     > np.tensordot(
                         np.asarray(time_snaps),
                         np.ones((self.nind, num_of_reals)),
@@ -703,18 +687,14 @@ class pneumoinfer:
                         axes=0,
                     )
                     >= np.tensordot(
-                        np.ones((len(time_snaps), self.nind)),
-                        previous_times,
-                        axes=0,
+                        np.ones((len(time_snaps), self.nind)), previous_times, axes=0,
                     )
                 )
                 * np.tensordot(np.ones(len(time_snaps)), Currs_members, axes=0)
             )
             npast_store += (
                 (
-                    np.tensordot(
-                        np.ones((len(time_snaps), self.nstat)), times, axes=0
-                    )
+                    np.tensordot(np.ones((len(time_snaps), self.nstat)), times, axes=0)
                     > np.tensordot(
                         np.asarray(time_snaps),
                         np.ones((self.nstat, num_of_reals)),
@@ -728,9 +708,7 @@ class pneumoinfer:
                         axes=0,
                     )
                     >= np.tensordot(
-                        np.ones((len(time_snaps), self.nstat)),
-                        previous_times,
-                        axes=0,
+                        np.ones((len(time_snaps), self.nstat)), previous_times, axes=0,
                     )
                 )
                 * np.tensordot(
@@ -747,6 +725,18 @@ class pneumoinfer:
                     time_snaps[ti]: npast_store[ti] for ti in range(0, len(time_snaps))
                 },
             }
+
+    def lnlikemultin(
+        self, p: np.ndarray, q: np.ndarray, n: np.ndarray, ntot: int,
+    ) -> float:
+        """A multinomial log-likelihood function."""
+        llike = (
+            spec.loggamma(ntot + 1.0)
+            - np.sum(spec.loggamma(n + 1.0), axis=0)
+            + (ntot - np.sum(n, axis=0)) * np.log(q)
+            + np.sum(n * np.log(p), axis=0)
+        )
+        return llike
 
     def lnlikelihood(self, df: pd.DataFrame) -> float:
         """
