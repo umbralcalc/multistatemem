@@ -65,7 +65,16 @@ class pneumoinfer:
     @property
     def ode_pop(self):
         if self._ode_pop is None:
-            self._ode_pop = {"sig": [], "eps": [], "mumax": [], "Curr": [], "N": []}
+            self._ode_pop = {
+                "sig": [], 
+                "eps": [], 
+                "mumax": [], 
+                "Curr": [], 
+                "N": [], 
+                "dataCount" : [],
+                "dataTime" : [],
+                "dataCurr" : [],
+            }
             for ns in range(1, self.nstat + 1):
                 self._ode_pop["npast_" + str(ns)] = []
                 self._ode_pop["mu_" + str(ns)] = []
@@ -91,7 +100,12 @@ class pneumoinfer:
             self.mode = "vary"
         return self._cont_mat
 
-    def create_members(self, num_of_members: int, parameter_dic: dict):
+    def create_members(
+        self, 
+        num_of_members: int, 
+        parameter_dic: dict,
+        data: pd.DataFrame = None,
+    ):
         """
 
         Method to add members (or a single member) to the ensemble.
@@ -142,6 +156,23 @@ class pneumoinfer:
                 (int with max value less than the 0-axis length of the 
                 contact matrix)
 
+        Keywords:
+        data
+            An optional pandas DataFrame of state observations at different
+            time points which must be associated to a count of individuals 
+            in the ensemble. The DataFrame must have the following columns:
+
+                'Count' : The number of individuals associated to this recorded
+                observation at this point in time [Mandatory]
+                (positive int)
+
+                'Time' : Time of the observation [Mandatory]
+                (float value beginning at 0.0 in units corresponding 
+                to the desired rates)
+
+                'Curr' : The state this individual was observed in [Mandatory]
+                (positive int where 0 is the null state)
+
         """
 
         # Initialise the contact matrix property (must be included
@@ -187,6 +218,16 @@ class pneumoinfer:
         # Set the current state uniformally across this ensemble group
         self.pop["Curr"] += [Curr] * num_of_members
         self.ode_pop["Curr"] += [Curr]
+
+        # If data has been added then include it with the ODE ensemble
+        if data is not None:
+            self.ode_pop["dataCount"] += [data.Count.values]
+            self.ode_pop["dataTime"] += [data.Time.values]
+            self.ode_pop["dataCurr"] += [data.Curr.values]
+        else:
+            self.ode_pop["dataCount"] += [False]
+            self.ode_pop["dataTime"] += [False]
+            self.ode_pop["dataCurr"] += [False]
 
         # Set the ensemble size for this group in the ODE system
         self.ode_pop["N"] += [num_of_members]
@@ -726,31 +767,194 @@ class pneumoinfer:
                 },
             }
 
-    def lnlikemultin(
-        self, p: np.ndarray, q: np.ndarray, n: np.ndarray, ntot: int,
-    ) -> float:
-        """A multinomial log-likelihood function."""
-        llike = (
-            spec.loggamma(ntot + 1.0)
-            - np.sum(spec.loggamma(n + 1.0), axis=0)
-            + (ntot - np.sum(n, axis=0)) * np.log(q)
-            + np.sum(n * np.log(p), axis=0)
-        )
-        return llike
-
-    def lnlikelihood(self, df: pd.DataFrame) -> float:
+    def maximise_lnlike(self, timescale: float) -> float:
         """
 
-        Method evaluate the log-likelihood given an input set of data.
+        Method maximise the log-likelihood given the input set of data
+        via the 'create_members' method. This makes use of the ODE 
+        approximation to the full simulation to evaluate the log-likelihood
+        and its gradient (the latter is computed using a 'multiple adjoint'
+        method inspired by https://arxiv.org/abs/2006.02493).
 
         Args:
-        df
-            A pandas DataFrame of observations with the following columns: 
-                'member_id' : ...
-                'time' : time in units of days
-                'state_id' : ...
-
+        timescale
+            The timescale (or stepsize) of the ode integrator.
 
         """
+        
+        # Extract the parameters in a form for faster simulation
+        Ns = np.asarray(self.ode_pop["N"])
+        num_of_groups = len(Ns)
+        sigs, epss, mumaxs, Currs = (
+            np.asarray(self.ode_pop["sig"]),
+            np.asarray(self.ode_pop["eps"]),
+            np.asarray(self.ode_pop["mumax"]),
+            np.asarray(self.ode_pop["Curr"]),
+        )
+        npasts, Lams, mus, fs, vefs, vts = [], [], [], [], [], []
+        for ns in range(1, self.nstat + 1):
+            npasts.append(self.ode_pop["npast_" + str(ns)])
+            Lams.append(self.ode_pop["Lam_" + str(ns)])
+            mus.append(self.ode_pop["mu_" + str(ns)])
+            fs.append(self.ode_pop["f_" + str(ns)])
+            vefs.append(self.ode_pop["vef_" + str(ns)])
+            vts.append(self.ode_pop["vt_" + str(ns)])
+        npasts, Lams, mus, fs = (
+            np.asarray(npasts),
+            np.asarray(Lams),
+            np.asarray(mus),
+            np.asarray(fs),
+        )
+        vefs, vts = np.asarray(vefs), np.asarray(vts)
 
-        print("Hello")
+        # Construct data vector representation
+        data_groups = []
+        gid = 0
+        for v in self.ode_pop["dataCount"]:
+            if v != False:
+                data_groups.append([gid]*len(v))
+            gid += 1
+        data_groups = np.asarray(data_groups).flatten()
+        data_counts = np.asarray(self.ode_pop["dataCount"]).flatten()
+        data_counts = data_counts[data_counts!=False]
+        data_times = np.asarray(self.ode_pop["dataTime"]).flatten()
+        data_times = data_times[data_times!=False]
+        data_Currs = np.asarray(self.ode_pop["dataCurr"]).flatten()
+        data_Currs = data_Currs[data_Currs!=False]
+
+        # Create higher-dimensional data structures for faster
+        # ode integration - index ordering is typically: [state,group]
+        groups_Currs = np.tensordot(np.ones(self.nstat), Currs, axes=0)
+        groups_sigs = np.tensordot(np.ones(self.nstat), sigs, axes=0)
+        groups_epss = np.tensordot(np.ones(self.nstat), epss, axes=0)
+        groups_mumaxs = np.tensordot(np.ones(self.nstat), mumaxs, axes=0)
+        groups_npasts, groups_Lams, groups_fs, groups_mus = npasts, Lams, fs, mus
+        groups_vts, groups_vefs = vts, vefs
+        groups_vefs_deliv = np.zeros((self.nstat, num_of_groups))
+
+        # Get the contact matrix if it exists
+        cont_mat = self.cont_mat
+
+        # If the occupation rates are independent of the ensemble
+        # state then run this ode system type
+        if self.mode == "fixed":
+
+            def Lams_function(p, groups_Lams):
+                return groups_Lams
+
+        # If the occupation rates are dependent on the ensemble
+        # state then run this ode system type instead
+        if self.mode == "vary":
+            cinds = np.asarray(self.ode_pop["cind"])
+            ind_contact = []
+            for ci in cinds:
+                ind_contact.append(cont_mat[ci][cinds])
+            ind_contact = np.asarray(ind_contact)
+            totN = np.sum(Ns)
+
+            def Lams_function(p, groups_Lams):
+                contp = np.tensordot(ind_contact, p, axes=([1], [1])).swapaxes(0, 1)
+                return groups_Lams + (contp * Ns / totN)
+
+        # Define a function which takes the ode system forward
+        # in time by a step
+        def next_step(qpn, t, dt=timescale):
+            qpn_new = qpn
+            q, p, n = (
+                qpn[0],
+                qpn[1 : self.nstat + 1],
+                qpn[self.nstat + 1 : 2 * self.nstat + 1],
+            )
+            due_mask = (t >= groups_vts) * (groups_vts != -1.0)
+            groups_vefs_deliv[due_mask] = groups_vefs[due_mask]
+            gLs = Lams_function(p, groups_Lams)
+            groups_Lams_v = gLs * (1.0 - groups_vefs_deliv)
+            groups_sigsLams_v = np.minimum(
+                groups_sigs * gLs, gLs * (1.0 - groups_vefs_deliv)
+            )
+            n_new = n + dt * (
+                (groups_sigsLams_v * np.tensordot(np.ones(self.nstat), q, axes=0))
+                + (
+                    (
+                        np.tensordot(
+                            np.ones(self.nstat), np.sum(groups_fs * p, axis=0), axes=0,
+                        )
+                        - (groups_fs * p)
+                    )
+                    * groups_sigsLams_v
+                )
+            )
+            F = (groups_Lams_v * np.exp(-n)) + (groups_sigsLams_v * (1.0 - np.exp(-n)))
+            G = groups_mumaxs + (groups_mus - groups_mumaxs) * np.exp(
+                np.tensordot(np.ones(self.nstat), np.sum(n, axis=0), axes=0)
+                * (np.exp(-groups_epss) - 1.0)
+            )
+            q_new = q + dt * (np.sum(G * p, axis=0) - (np.sum(F, axis=0) * q))
+            p_new = p + dt * (
+                (F * q)
+                + (
+                    (
+                        np.tensordot(
+                            np.ones(self.nstat), np.sum(groups_fs * p, axis=0), axes=0,
+                        )
+                        - (groups_fs * p)
+                    )
+                    * F
+                )
+                - (G * p)
+                - (
+                    (np.tensordot(np.ones(self.nstat), np.sum(F, axis=0), axes=0) - F)
+                    * groups_fs
+                    * p
+                )
+            )
+            (
+                qpn_new[0],
+                qpn_new[1 : self.nstat + 1],
+                qpn_new[self.nstat + 1 : 2 * self.nstat + 1],
+            ) = (q_new, p_new, n_new)
+            return qpn_new
+
+        # Define a vectorised multinomial log-likelihood function
+        def lnlikemultin(qpn, nobs, ntot):
+            q, p = qpn[0], qpn[1 : self.nstat + 1]
+            lnlike = (
+                spec.loggamma(ntot + 1.0)
+                - np.sum(spec.loggamma(nobs + 1.0), axis=0)
+                + (ntot - np.sum(nobs, axis=0)) * np.log(q)
+                + np.sum(nobs * np.log(p), axis=0)
+            )
+            return lnlike
+
+        # Define a function which runs the system over the specified
+        # time period
+        def run_ode_compute_lnlike(qpn0, t0, t, dt=timescale):
+            qpn = qpn0
+            steps = int((t - t0) / dt)
+            t = t0
+            N_weights = np.tensordot(np.ones(2 * self.nstat + 1), Ns, axes=0)
+            data_rec = np.zeros_like(data_times)
+            lnlike = 0.0
+            for i in range(0, steps):
+                qpn = next_step(qpn, t, dt)
+                t += dt
+                lnlike += lnlikemultin(qpn)
+            return lnlike
+
+        # Run the system with consistent initial conditions and generate
+        # output dictionary
+        q0 = np.zeros(num_of_groups)
+        p0 = np.zeros((self.nstat, num_of_groups))
+        n0 = groups_npasts
+        q0[Currs == 0] = 1.0
+        p0[
+            groups_Currs
+            == np.tensordot(
+                np.arange(1, self.nstat + 1, 1), np.ones(num_of_groups), axes=0
+            )
+        ] = 1.0
+        qpn0 = np.zeros((2 * self.nstat + 1, num_of_groups))
+        qpn0[0] = q0
+        qpn0[1 : self.nstat + 1] = p0
+        qpn0[self.nstat + 1 : 2 * self.nstat + 1] = n0
+        lnlike = run_ode_compute_lnlike(qpn0, 0, runtime)
