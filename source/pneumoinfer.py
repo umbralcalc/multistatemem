@@ -225,9 +225,9 @@ class pneumoinfer:
             self.ode_pop["dataTime"] += [data.Time.values]
             self.ode_pop["dataCurr"] += [data.Curr.values]
         else:
-            self.ode_pop["dataCount"] += [False]
-            self.ode_pop["dataTime"] += [False]
-            self.ode_pop["dataCurr"] += [False]
+            self.ode_pop["dataCount"] += [None]
+            self.ode_pop["dataTime"] += [None]
+            self.ode_pop["dataCurr"] += [None]
 
         # Set the ensemble size for this group in the ODE system
         self.ode_pop["N"] += [num_of_members]
@@ -811,16 +811,24 @@ class pneumoinfer:
         data_groups = []
         gid = 0
         for v in self.ode_pop["dataCount"]:
-            if v != False:
+            if v is not None:
                 data_groups.append([gid]*len(v))
             gid += 1
-        data_groups = np.asarray(data_groups).flatten()
-        data_counts = np.asarray(self.ode_pop["dataCount"]).flatten()
-        data_counts = data_counts[data_counts!=False]
-        data_times = np.asarray(self.ode_pop["dataTime"]).flatten()
-        data_times = data_times[data_times!=False]
-        data_Currs = np.asarray(self.ode_pop["dataCurr"]).flatten()
-        data_Currs = data_Currs[data_Currs!=False]
+        data_counts = np.array([])
+        data_times = np.array([])
+        data_Currs = np.array([])
+        for vi in range(0, len(self.ode_pop["dataCount"])):
+            co = self.ode_pop["dataCount"][vi]
+            cu = self.ode_pop["dataCurr"][vi]
+            ti = self.ode_pop["dataTime"][vi]
+            if co is not None:
+                data_counts = np.append(data_counts, co)
+            if cu is not None:
+                data_Currs = np.append(data_Currs, cu)
+            if ti is not None:
+                data_times = np.append(data_times, ti)
+        data_groups = np.asarray(data_groups).flatten().astype(int)
+        data_Currs = data_Currs.astype(int)
 
         # Create higher-dimensional data structures for faster
         # ode integration - index ordering is typically: [state,group]
@@ -934,24 +942,24 @@ class pneumoinfer:
             groups_mus=groups_mus,
         ):
             qpn = qpn0
-            next_step = next_step_with_params(
-                dt=dt, 
-                dt=timescale, 
-                groups_Lams=groups_Lams, 
-                groups_fs=groups_fs, 
-                groups_mus=groups_mus,
-            )
             steps = int((tend - t0) / dt)
             t, past_t = t0, t0
             lnlike = 0.0
             for i in range(0, steps):
-                qpn = next_step(qpn, t)
+                qpn = next_step_with_params(
+                    qpn,
+                    t,
+                    dt=dt,
+                    groups_Lams=groups_Lams, 
+                    groups_fs=groups_fs, 
+                    groups_mus=groups_mus,
+                )
                 past_t = t
                 t += dt
                 rec = ((t >= data_times) * (data_times > past_t)) == True
                 if np.any(rec):
                     data_qp = qpn[: self.nstat + 1][(data_Currs[rec], data_groups[rec])]
-                    lnlike += np.sum(data_counts * np.log(data_qp))
+                    lnlike += np.sum(data_counts[rec] * np.log(data_qp))
             return lnlike
 
         # Run the system with consistent initial conditions and generate
