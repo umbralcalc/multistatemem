@@ -66,14 +66,14 @@ class pneumoinfer:
     def ode_pop(self):
         if self._ode_pop is None:
             self._ode_pop = {
-                "sig": [], 
-                "eps": [], 
-                "mumax": [], 
-                "Curr": [], 
-                "N": [], 
-                "dataCount" : [],
-                "dataTime" : [],
-                "dataCurr" : [],
+                "sig": [],
+                "eps": [],
+                "mumax": [],
+                "Curr": [],
+                "N": [],
+                "dataCount": [],
+                "dataTime": [],
+                "dataCurr": [],
             }
             for ns in range(1, self.nstat + 1):
                 self._ode_pop["npast_" + str(ns)] = []
@@ -101,10 +101,7 @@ class pneumoinfer:
         return self._cont_mat
 
     def create_members(
-        self, 
-        num_of_members: int, 
-        parameter_dic: dict,
-        data: pd.DataFrame = None,
+        self, num_of_members: int, parameter_dic: dict, data: pd.DataFrame = None,
     ):
         """
 
@@ -781,7 +778,7 @@ class pneumoinfer:
             The timescale (or stepsize) of the ode integrator.
 
         """
-        
+
         # Extract the parameters in a form for faster simulation
         Ns = np.asarray(self.ode_pop["N"])
         num_of_groups = len(Ns)
@@ -812,7 +809,7 @@ class pneumoinfer:
         gid = 0
         for v in self.ode_pop["dataCount"]:
             if v is not None:
-                data_groups.append([gid]*len(v))
+                data_groups.append([gid] * len(v))
             gid += 1
         data_counts = np.array([])
         data_times = np.array([])
@@ -867,11 +864,11 @@ class pneumoinfer:
         # Define a function which takes the ode system forward
         # in time with variable parameter keywords
         def next_step_with_params(
-            qpn, 
-            t, 
-            dt=timescale, 
-            groups_Lams=groups_Lams, 
-            groups_fs=groups_fs, 
+            qpn,
+            t,
+            dt=timescale,
+            groups_Lams=groups_Lams,
+            groups_fs=groups_fs,
             groups_mus=groups_mus,
         ):
             qpn_new = qpn
@@ -933,12 +930,12 @@ class pneumoinfer:
         # Define a function which runs the system over the specified
         # time period and computes the log-likelihood given the parameters
         def run_ode_compute_lnlike(
-            qpn0, 
-            t0, 
-            tend, 
+            qpn0,
+            t0,
+            tend,
             dt=timescale,
-            groups_Lams=groups_Lams, 
-            groups_fs=groups_fs, 
+            groups_Lams=groups_Lams,
+            groups_fs=groups_fs,
             groups_mus=groups_mus,
         ):
             qpn = qpn0
@@ -950,8 +947,8 @@ class pneumoinfer:
                     qpn,
                     t,
                     dt=dt,
-                    groups_Lams=groups_Lams, 
-                    groups_fs=groups_fs, 
+                    groups_Lams=groups_Lams,
+                    groups_fs=groups_fs,
                     groups_mus=groups_mus,
                 )
                 past_t = t
