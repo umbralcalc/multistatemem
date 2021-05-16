@@ -384,14 +384,14 @@ class pneumoinfer:
 
         # Define a function which runs the system over the specified
         # time period
-        def run_system(qpn0, t0, t, dt=timescale):
+        def run_system(qpn0, t0, tend, dt=timescale):
             qpn = qpn0
-            steps = int((t - t0) / dt)
+            steps = int((tend - t0) / dt)
             t = t0
             rec = []
             N_weights = np.tensordot(np.ones(2 * self.nstat + 1), Ns, axes=0)
             for i in range(0, steps):
-                qpn = next_step(qpn, t, dt)
+                qpn = next_step(qpn, t, dt=dt)
                 outp = np.sum(N_weights * qpn, axis=1) / self.nind
                 t += dt
                 rec.append(np.append(t, outp))
@@ -857,8 +857,15 @@ class pneumoinfer:
                 return groups_Lams + (contp * Ns / totN)
 
         # Define a function which takes the ode system forward
-        # in time by a step
-        def next_step(qpn, t, dt=timescale):
+        # in time with variable parameter keywords
+        def next_step_with_params(
+            qpn, 
+            t, 
+            dt=timescale, 
+            groups_Lams=groups_Lams, 
+            groups_fs=groups_fs, 
+            groups_mus=groups_mus,
+        ):
             qpn_new = qpn
             q, p, n = (
                 qpn[0],
@@ -915,30 +922,36 @@ class pneumoinfer:
             ) = (q_new, p_new, n_new)
             return qpn_new
 
-        # Define a vectorised multinomial log-likelihood function
-        def lnlikemultin(qpn, nobs, ntot):
-            q, p = qpn[0], qpn[1 : self.nstat + 1]
-            lnlike = (
-                spec.loggamma(ntot + 1.0)
-                - np.sum(spec.loggamma(nobs + 1.0), axis=0)
-                + (ntot - np.sum(nobs, axis=0)) * np.log(q)
-                + np.sum(nobs * np.log(p), axis=0)
-            )
-            return lnlike
-
         # Define a function which runs the system over the specified
-        # time period
-        def run_ode_compute_lnlike(qpn0, t0, t, dt=timescale):
+        # time period and computes the log-likelihood given the parameters
+        def run_ode_compute_lnlike(
+            qpn0, 
+            t0, 
+            tend, 
+            dt=timescale,
+            groups_Lams=groups_Lams, 
+            groups_fs=groups_fs, 
+            groups_mus=groups_mus,
+        ):
             qpn = qpn0
-            steps = int((t - t0) / dt)
-            t = t0
-            N_weights = np.tensordot(np.ones(2 * self.nstat + 1), Ns, axes=0)
-            data_rec = np.zeros_like(data_times)
+            next_step = next_step_with_params(
+                dt=dt, 
+                dt=timescale, 
+                groups_Lams=groups_Lams, 
+                groups_fs=groups_fs, 
+                groups_mus=groups_mus,
+            )
+            steps = int((tend - t0) / dt)
+            t, past_t = t0, t0
             lnlike = 0.0
             for i in range(0, steps):
-                qpn = next_step(qpn, t, dt)
+                qpn = next_step(qpn, t)
+                past_t = t
                 t += dt
-                lnlike += lnlikemultin(qpn)
+                rec = ((t >= data_times) * (data_times > past_t)) == True
+                if np.any(rec):
+                    data_qp = qpn[: self.nstat + 1][(data_Currs[rec], data_groups[rec])]
+                    lnlike += np.sum(data_counts * np.log(data_qp))
             return lnlike
 
         # Run the system with consistent initial conditions and generate
@@ -957,4 +970,5 @@ class pneumoinfer:
         qpn0[0] = q0
         qpn0[1 : self.nstat + 1] = p0
         qpn0[self.nstat + 1 : 2 * self.nstat + 1] = n0
-        lnlike = run_ode_compute_lnlike(qpn0, 0, runtime)
+        lnlike = run_ode_compute_lnlike(qpn0, 0, np.max(data_times) + timescale)
+        return lnlike
