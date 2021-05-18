@@ -15,7 +15,6 @@ public repo for a more user-friendly experience.
 
 import numpy as np
 import pandas as pd
-import scipy.special as spec
 
 
 # Initialise the 'pneumoinfer' method class
