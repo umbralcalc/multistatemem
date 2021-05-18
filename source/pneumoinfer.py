@@ -38,6 +38,7 @@ class pneumoinfer:
         # Set initialisation variables of the class
         self.nstat = num_of_states
         self.nind = 0
+        self._params = None
         self._pop = None
         self._ode_pop = None
         self._cont_mat = None
@@ -83,6 +84,74 @@ class pneumoinfer:
                 self._ode_pop["vt_" + str(ns)] = []
                 self._ode_pop["Lam_" + str(ns)] = []
         return self._ode_pop
+
+    @property
+    def params(self):
+        if self._params is None:
+            self._params = {"sim" : {}, "ode" : {}}
+            self._params["sim"]["sig"] = np.asarray(self.pop["sig"])
+            self._params["sim"]["eps"] = np.asarray(self.pop["eps"])
+            self._params["sim"]["mumax"] = np.asarray(self.pop["mumax"])
+            self._params["sim"]["Curr"] = np.asarray(self.pop["Curr"])
+            npasts, Lams, mus, fs, vefs, vts = [], [], [], [], [], []
+            for ns in range(1, self.nstat + 1):
+                npasts.append(self.pop["npast_" + str(ns)])
+                Lams.append(self.pop["Lam_" + str(ns)])
+                mus.append(self.pop["mu_" + str(ns)])
+                fs.append(self.pop["f_" + str(ns)])
+                vefs.append(self.pop["vef_" + str(ns)])
+                vts.append(self.pop["vt_" + str(ns)])
+            self._params["sim"]["npasts"] = np.asarray(npasts)
+            self._params["sim"]["Lams"] = np.asarray(Lams)
+            self._params["sim"]["mus"] = np.asarray(mus)
+            self._params["sim"]["fs"] = np.asarray(fs)
+            self._params["sim"]["vefs"] = np.asarray(vefs)
+            self._params["sim"]["vts"] = np.asarray(vts)
+            self._params["ode"]["N"] = np.asarray(self.ode_pop["N"])
+            self._params["ode"]["sig"] = np.asarray(self.ode_pop["sig"])
+            self._params["ode"]["eps"] = np.asarray(self.ode_pop["eps"])
+            self._params["ode"]["mumax"] = np.asarray(self.ode_pop["mumax"])
+            self._params["ode"]["Curr"] = np.asarray(self.ode_pop["Curr"])
+            npasts, Lams, mus, fs, vefs, vts = [], [], [], [], [], []
+            for ns in range(1, self.nstat + 1):
+                npasts.append(self.ode_pop["npast_" + str(ns)])
+                Lams.append(self.ode_pop["Lam_" + str(ns)])
+                mus.append(self.ode_pop["mu_" + str(ns)])
+                fs.append(self.ode_pop["f_" + str(ns)])
+                vefs.append(self.ode_pop["vef_" + str(ns)])
+                vts.append(self.ode_pop["vt_" + str(ns)])
+            self._params["ode"]["npasts"] = np.asarray(npasts)
+            self._params["ode"]["Lams"] = np.asarray(Lams)
+            self._params["ode"]["mus"] = np.asarray(mus)
+            self._params["ode"]["fs"] = np.asarray(fs)
+            self._params["ode"]["vefs"] = np.asarray(vefs)
+            self._params["ode"]["vts"] = np.asarray(vts)
+            data_groups = []
+            gid = 0
+            for v in self.ode_pop["dataCount"]:
+                if v is not None:
+                    data_groups.append([gid] * len(v))
+                gid += 1
+            data_counts = np.array([])
+            data_times = np.array([])
+            data_Currs = np.array([])
+            for vi in range(0, len(self.ode_pop["dataCount"])):
+                co = self.ode_pop["dataCount"][vi]
+                cu = self.ode_pop["dataCurr"][vi]
+                ti = self.ode_pop["dataTime"][vi]
+                if co is not None:
+                    data_counts = np.append(data_counts, co)
+                if cu is not None:
+                    data_Currs = np.append(data_Currs, cu)
+                if ti is not None:
+                    data_times = np.append(data_times, ti)
+            data_groups = np.asarray(data_groups).flatten().astype(int)
+            data_Currs = data_Currs.astype(int)
+            self._params["ode"]["dataCount"] = data_counts
+            self._params["ode"]["dataCurr"] = data_Currs
+            self._params["ode"]["dataTime"] = data_times
+            self._params["ode"]["dataGroup"] = data_groups
+        return self._params
 
     @property
     def cont_mat(self):
@@ -262,29 +331,21 @@ class pneumoinfer:
         """
 
         # Extract the parameters in a form for faster simulation
-        Ns = np.asarray(self.ode_pop["N"])
+        par = self.params
+        Ns = par["ode"]["N"]
         num_of_groups = len(Ns)
-        sigs, epss, mumaxs, Currs = (
-            np.asarray(self.ode_pop["sig"]),
-            np.asarray(self.ode_pop["eps"]),
-            np.asarray(self.ode_pop["mumax"]),
-            np.asarray(self.ode_pop["Curr"]),
+        sigs, epss, mumaxs, Currs, npasts, Lams, mus, fs, vefs, vts = (
+            par["ode"]["sig"],
+            par["ode"]["eps"],
+            par["ode"]["mumax"],
+            par["ode"]["Curr"],
+            par["ode"]["npasts"],
+            par["ode"]["Lams"],
+            par["ode"]["mus"],
+            par["ode"]["fs"],
+            par["ode"]["vefs"],
+            par["ode"]["vts"],
         )
-        npasts, Lams, mus, fs, vefs, vts = [], [], [], [], [], []
-        for ns in range(1, self.nstat + 1):
-            npasts.append(self.ode_pop["npast_" + str(ns)])
-            Lams.append(self.ode_pop["Lam_" + str(ns)])
-            mus.append(self.ode_pop["mu_" + str(ns)])
-            fs.append(self.ode_pop["f_" + str(ns)])
-            vefs.append(self.ode_pop["vef_" + str(ns)])
-            vts.append(self.ode_pop["vt_" + str(ns)])
-        npasts, Lams, mus, fs = (
-            np.asarray(npasts),
-            np.asarray(Lams),
-            np.asarray(mus),
-            np.asarray(fs),
-        )
-        vefs, vts = np.asarray(vefs), np.asarray(vts)
 
         # Create higher-dimensional data structures for faster
         # ode integration - index ordering is typically: [state,group]
@@ -456,27 +517,19 @@ class pneumoinfer:
         time_snaps.append(runtime)
 
         # Extract the parameters in a form for faster simulation
-        sigs, epss, mumaxs, Currs = (
-            np.asarray(self.pop["sig"]),
-            np.asarray(self.pop["eps"]),
-            np.asarray(self.pop["mumax"]),
-            np.asarray(self.pop["Curr"]),
+        par = self.params
+        sigs, epss, mumaxs, Currs, npasts, Lams, mus, fs, vefs, vts = (
+            par["sim"]["sig"],
+            par["sim"]["eps"],
+            par["sim"]["mumax"],
+            par["sim"]["Curr"],
+            par["sim"]["npasts"],
+            par["sim"]["Lams"],
+            par["sim"]["mus"],
+            par["sim"]["fs"],
+            par["sim"]["vefs"],
+            par["sim"]["vts"],
         )
-        npasts, Lams, mus, fs, vefs, vts = [], [], [], [], [], []
-        for ns in range(1, self.nstat + 1):
-            npasts.append(self.pop["npast_" + str(ns)])
-            Lams.append(self.pop["Lam_" + str(ns)])
-            mus.append(self.pop["mu_" + str(ns)])
-            fs.append(self.pop["f_" + str(ns)])
-            vefs.append(self.pop["vef_" + str(ns)])
-            vts.append(self.pop["vt_" + str(ns)])
-        npasts, Lams, mus, fs = (
-            np.asarray(npasts),
-            np.asarray(Lams),
-            np.asarray(mus),
-            np.asarray(fs),
-        )
-        vefs, vts = np.asarray(vefs), np.asarray(vts)
 
         # Create higher-dimensional data structures for faster
         # simulations - index ordering is typically:
@@ -764,10 +817,10 @@ class pneumoinfer:
                 },
             }
 
-    def maximise_lnlike(self, timescale: float) -> float:
+    def lnlike_and_grad(self, timescale: float) -> float:
         """
 
-        Method maximise the log-likelihood given the input set of data
+        Method to compute the log-likelihood given the input set of data
         via the 'create_members' method. This makes use of the ODE 
         approximation to the full simulation to evaluate the log-likelihood
         and its gradient (the latter is computed using a 'multiple adjoint'
@@ -780,52 +833,29 @@ class pneumoinfer:
         """
 
         # Extract the parameters in a form for faster simulation
-        Ns = np.asarray(self.ode_pop["N"])
+        par = self.params
+        Ns = par["ode"]["N"]
         num_of_groups = len(Ns)
-        sigs, epss, mumaxs, Currs = (
-            np.asarray(self.ode_pop["sig"]),
-            np.asarray(self.ode_pop["eps"]),
-            np.asarray(self.ode_pop["mumax"]),
-            np.asarray(self.ode_pop["Curr"]),
+        sigs, epss, mumaxs, Currs, npasts, Lams, mus, fs, vefs, vts = (
+            par["ode"]["sig"],
+            par["ode"]["eps"],
+            par["ode"]["mumax"],
+            par["ode"]["Curr"],
+            par["ode"]["npasts"],
+            par["ode"]["Lams"],
+            par["ode"]["mus"],
+            par["ode"]["fs"],
+            par["ode"]["vefs"],
+            par["ode"]["vts"],
         )
-        npasts, Lams, mus, fs, vefs, vts = [], [], [], [], [], []
-        for ns in range(1, self.nstat + 1):
-            npasts.append(self.ode_pop["npast_" + str(ns)])
-            Lams.append(self.ode_pop["Lam_" + str(ns)])
-            mus.append(self.ode_pop["mu_" + str(ns)])
-            fs.append(self.ode_pop["f_" + str(ns)])
-            vefs.append(self.ode_pop["vef_" + str(ns)])
-            vts.append(self.ode_pop["vt_" + str(ns)])
-        npasts, Lams, mus, fs = (
-            np.asarray(npasts),
-            np.asarray(Lams),
-            np.asarray(mus),
-            np.asarray(fs),
-        )
-        vefs, vts = np.asarray(vefs), np.asarray(vts)
 
-        # Construct data vector representation
-        data_groups = []
-        gid = 0
-        for v in self.ode_pop["dataCount"]:
-            if v is not None:
-                data_groups.append([gid] * len(v))
-            gid += 1
-        data_counts = np.array([])
-        data_times = np.array([])
-        data_Currs = np.array([])
-        for vi in range(0, len(self.ode_pop["dataCount"])):
-            co = self.ode_pop["dataCount"][vi]
-            cu = self.ode_pop["dataCurr"][vi]
-            ti = self.ode_pop["dataTime"][vi]
-            if co is not None:
-                data_counts = np.append(data_counts, co)
-            if cu is not None:
-                data_Currs = np.append(data_Currs, cu)
-            if ti is not None:
-                data_times = np.append(data_times, ti)
-        data_groups = np.asarray(data_groups).flatten().astype(int)
-        data_Currs = data_Currs.astype(int)
+        # Extract data vector representation
+        data_counts, data_Currs, data_times, data_groups = (
+            par["ode"]["dataCount"],
+            par["ode"]["dataCurr"],
+            par["ode"]["dataTime"],
+            par["ode"]["dataGroup"],
+        )
 
         # Create higher-dimensional data structures for faster
         # ode integration - index ordering is typically: [state,group]
@@ -929,7 +959,7 @@ class pneumoinfer:
 
         # Define a function which runs the system over the specified
         # time period and computes the log-likelihood given the parameters
-        def run_ode_compute_lnlike(
+        def compute_lnlike_and_Dlnlike(
             qpn0,
             t0,
             tend,
@@ -957,7 +987,8 @@ class pneumoinfer:
                 if np.any(rec):
                     data_qp = qpn[: self.nstat + 1][(data_Currs[rec], data_groups[rec])]
                     lnlike += np.sum(data_counts[rec] * np.log(data_qp))
-            return lnlike
+            Dlnlike = np.zeros(3 * self.nstat + 1)
+            return lnlike, Dlnlike
 
         # Run the system with consistent initial conditions and generate
         # output dictionary
@@ -975,5 +1006,5 @@ class pneumoinfer:
         qpn0[0] = q0
         qpn0[1 : self.nstat + 1] = p0
         qpn0[self.nstat + 1 : 2 * self.nstat + 1] = n0
-        lnlike = run_ode_compute_lnlike(qpn0, 0, np.max(data_times) + timescale)
-        return lnlike
+        lnlike, Dlnlike = compute_lnlike_and_Dlnlike(qpn0, 0, np.max(data_times) + timescale)
+        return lnlike, Dlnlike
