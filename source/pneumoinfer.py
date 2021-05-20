@@ -828,18 +828,22 @@ class pneumoinfer:
                 },
             }
 
-    def lnlike_and_grad(self, timescale: float) -> float:
+    def lnlike(self, timescale: float, grad: bool = False) -> float:
         """
 
         Method to compute the log-likelihood given the input set of data
         via the 'create_members' method. This makes use of the ODE 
-        approximation to the full simulation to evaluate the log-likelihood
-        and its gradient (the latter is computed using a 'multiple adjoint'
-        method inspired by https://arxiv.org/abs/2006.02493).
+        approximation to the full simulation.
 
         Args:
         timescale
             The timescale (or stepsize) of the ode integrator.
+
+        Keywords:
+        grad
+            If True, also computes the gradient of the log-likelihood
+            using a 'multiple adjoint' method inspired by 
+            https://arxiv.org/abs/2006.02493.
 
         """
 
@@ -964,21 +968,33 @@ class pneumoinfer:
 
         # Define a function which runs the system over the specified
         # time period and computes the log-likelihood
-        def compute_lnlike_and_Dlnlike(qpn0, t0, tend, dt=timescale):
+        def compute_lnlike(qpn0, t0, tend, dt=timescale, grad=grad):
             qpn = qpn0
             steps = int((tend - t0) / dt)
             t, past_t = t0, t0
             lnlike = 0.0
-            for i in range(0, steps):
-                qpn = next_step(qpn, t, dt=dt)
-                past_t = t
-                t += dt
-                rec = ((t >= data_times) * (data_times > past_t)) == True
-                if np.any(rec):
-                    data_qp = qpn[: self.nstat + 1][(data_Currs[rec], data_groups[rec])]
-                    lnlike += np.sum(data_counts[rec] * np.log(data_qp))
-            Dlnlike = np.zeros(3 * self.nstat + 1)
-            return lnlike, Dlnlike
+            if grad:
+                Dlnlike = np.zeros(3 * self.nstat + 1)
+                for i in range(0, steps):
+                    qpn = next_step(qpn, t, dt=dt)
+                    past_t = t
+                    t += dt
+                    rec = ((t >= data_times) * (data_times > past_t)) == True
+                    if np.any(rec):
+                        data_qp = qpn[: self.nstat + 1][(data_Currs[rec], data_groups[rec])]
+                        lnlike += np.sum(data_counts[rec] * np.log(data_qp))
+                        Dlnlike += np.zeros(3 * self.nstat + 1)
+                return lnlike, Dlnlike
+            else:
+                for i in range(0, steps):
+                    qpn = next_step(qpn, t, dt=dt)
+                    past_t = t
+                    t += dt
+                    rec = ((t >= data_times) * (data_times > past_t)) == True
+                    if np.any(rec):
+                        data_qp = qpn[: self.nstat + 1][(data_Currs[rec], data_groups[rec])]
+                        lnlike += np.sum(data_counts[rec] * np.log(data_qp))
+                return lnlike
 
         # Run the system with consistent initial conditions and generate
         # output dictionary
@@ -996,5 +1012,5 @@ class pneumoinfer:
         qpn0[0] = q0
         qpn0[1 : self.nstat + 1] = p0
         qpn0[self.nstat + 1 : 2 * self.nstat + 1] = n0
-        lnlike, Dlnlike = compute_lnlike_and_Dlnlike(qpn0, 0, np.max(data_times) + timescale)
-        return lnlike, Dlnlike
+        return compute_lnlike(qpn0, 0, np.max(data_times) + timescale)
+        
