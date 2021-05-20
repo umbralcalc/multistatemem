@@ -41,6 +41,7 @@ class pneumoinfer:
         self._pop = None
         self._ode_pop = None
         self._cont_mat = None
+        self._cont_mat_scale = None
 
     @property
     def pop(self):
@@ -169,6 +170,13 @@ class pneumoinfer:
         else:
             self.mode = "vary"
         return self._cont_mat
+
+    @property
+    def cont_mat_scale(self):
+        # Create a default scale for the contact matrix of 1 if not already included
+        if self._cont_mat_scale is None:
+            self._cont_mat_scale = 1.0
+        return self._cont_mat_scale
 
     def create_members(
         self, num_of_members: int, parameter_dic: dict, data: pd.DataFrame = None,
@@ -371,6 +379,7 @@ class pneumoinfer:
         # If the occupation rates are dependent on the ensemble
         # state then run this ode system type instead
         if self.mode == "vary":
+            cont_mat = self.cont_mat_scale * cont_mat
             cinds = np.asarray(self.ode_pop["cind"])
             ind_contact = []
             for ci in cinds:
@@ -579,6 +588,7 @@ class pneumoinfer:
         # If the occupation rates are instead dependent on
         # the ensemble state then run this simulation type
         if self.mode == "vary":
+            cont_mat = self.cont_mat_scale * cont_mat
             cinds = np.asarray(self.pop["cind"])
             ind_contact = []
             for ci in cinds:
@@ -881,6 +891,7 @@ class pneumoinfer:
         # If the occupation rates are dependent on the ensemble
         # state then run this ode system type instead
         if self.mode == "vary":
+            cont_mat = self.cont_mat_scale * cont_mat
             cinds = np.asarray(self.ode_pop["cind"])
             ind_contact = []
             for ci in cinds:
