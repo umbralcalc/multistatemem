@@ -87,6 +87,8 @@ class pneumoinfer:
     @property
     def params(self):
         if self._params is None:
+            # Extract the parameters in a vectorised form for the
+            # ODE approximate system and the simulation
             self._params = {"sim" : {}, "ode" : {}}
             self._params["sim"]["sig"] = np.asarray(self.pop["sig"])
             self._params["sim"]["eps"] = np.asarray(self.pop["eps"])
@@ -329,7 +331,7 @@ class pneumoinfer:
 
         """
 
-        # Extract the parameters in a form for faster simulation
+        # Extract the parameters in a form for faster computation
         par = self.params
         Ns = par["ode"]["N"]
         num_of_groups = len(Ns)
@@ -515,7 +517,7 @@ class pneumoinfer:
         # Add the endpoint to the specified output
         time_snaps.append(runtime)
 
-        # Extract the parameters in a form for faster simulation
+        # Extract the parameters in a form for faster computation
         par = self.params
         sigs, epss, mumaxs, Currs, npasts, Lams, mus, fs, vefs, vts = (
             par["sim"]["sig"],
@@ -831,7 +833,7 @@ class pneumoinfer:
 
         """
 
-        # Extract the parameters in a form for faster simulation
+        # Extract the parameters in a form for faster computation
         par = self.params
         Ns = par["ode"]["N"]
         num_of_groups = len(Ns)
@@ -891,15 +893,8 @@ class pneumoinfer:
                 return groups_Lams + (contp * Ns / totN)
 
         # Define a function which takes the ode system forward
-        # in time with variable parameter keywords
-        def next_step_with_params(
-            qpn,
-            t,
-            dt=timescale,
-            groups_Lams=groups_Lams,
-            groups_fs=groups_fs,
-            groups_mus=groups_mus,
-        ):
+        # in time by a step
+        def next_step(qpn, t, dt=timescale):
             qpn_new = qpn
             q, p, n = (
                 qpn[0],
@@ -957,29 +952,14 @@ class pneumoinfer:
             return qpn_new
 
         # Define a function which runs the system over the specified
-        # time period and computes the log-likelihood given the parameters
-        def compute_lnlike_and_Dlnlike(
-            qpn0,
-            t0,
-            tend,
-            dt=timescale,
-            groups_Lams=groups_Lams,
-            groups_fs=groups_fs,
-            groups_mus=groups_mus,
-        ):
+        # time period and computes the log-likelihood
+        def compute_lnlike_and_Dlnlike(qpn0, t0, tend, dt=timescale):
             qpn = qpn0
             steps = int((tend - t0) / dt)
             t, past_t = t0, t0
             lnlike = 0.0
             for i in range(0, steps):
-                qpn = next_step_with_params(
-                    qpn,
-                    t,
-                    dt=dt,
-                    groups_Lams=groups_Lams,
-                    groups_fs=groups_fs,
-                    groups_mus=groups_mus,
-                )
+                qpn = next_step(qpn, t, dt=dt)
                 past_t = t
                 t += dt
                 rec = ((t >= data_times) * (data_times > past_t)) == True
