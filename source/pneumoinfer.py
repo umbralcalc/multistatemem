@@ -828,7 +828,11 @@ class pneumoinfer:
                 },
             }
 
-    def lnlike(self, timescale: float, grad: bool = False) -> float:
+    def lnlike(
+        self, 
+        timescale: float, 
+        grad: bool = False,
+    ) -> float:
         """
 
         Method to compute the log-likelihood given the input set of data
@@ -837,13 +841,13 @@ class pneumoinfer:
 
         Args:
         timescale
-            The timescale (or stepsize) of the ode integrator.
+            The timescale (or stepsize) of the ode integrator.  
 
         Keywords:
         grad
             If True, also computes the gradient of the log-likelihood
-            using a 'multiple adjoint' method inspired by 
-            https://arxiv.org/abs/2006.02493.
+            using a simplified version of the 'checkpoint multiple 
+            adjoint' method implemented in https://arxiv.org/abs/2006.02493.
 
         """
 
@@ -966,31 +970,169 @@ class pneumoinfer:
             ) = (q_new, p_new, n_new)
             return qpn_new
 
-        # Define a function which runs the system over the specified
-        # time period and computes the log-likelihood
-        def compute_lnlike(qpn0, t0, tend, dt=timescale, grad=grad):
-            qpn = qpn0
-            steps = int((tend - t0) / dt)
-            t, past_t = t0, t0
-            lnlike = 0.0
-            if grad:
-                Dlnlike = np.zeros(3 * self.nstat + 1)
+        if grad:
+            if self.mode == "fixed":
+                def ode_RHS_grad_mat(qpn, t):
+                    grad_mat = np.zeros((qpn.shape[0], qpn.shape[1], 3 * self.nstat))
+                    qpn_new = qpn
+                    q, p, n = (
+                        qpn[0],
+                        qpn[1 : self.nstat + 1],
+                        qpn[self.nstat + 1 : 2 * self.nstat + 1],
+                    )
+                    due_mask = (t >= groups_vts) * (groups_vts != -1.0)
+                    groups_vefs_deliv[due_mask] = groups_vefs[due_mask]
+                    gLs = Lams_function(p, groups_Lams)
+                    groups_Lams_v = gLs * (1.0 - groups_vefs_deliv)
+                    groups_sigsLams_v = np.minimum(
+                        groups_sigs * gLs, gLs * (1.0 - groups_vefs_deliv)
+                    )
+                    n_new = n + dt * (
+                        (groups_sigsLams_v * np.tensordot(np.ones(self.nstat), q, axes=0))
+                        + (
+                            (
+                                np.tensordot(
+                                    np.ones(self.nstat), np.sum(groups_fs * p, axis=0), axes=0,
+                                )
+                                - (groups_fs * p)
+                            )
+                            * groups_sigsLams_v
+                        )
+                    )
+                    F = (groups_Lams_v * np.exp(-n)) + (groups_sigsLams_v * (1.0 - np.exp(-n)))
+                    G = groups_mumaxs + (groups_mus - groups_mumaxs) * np.exp(
+                        np.tensordot(np.ones(self.nstat), np.sum(n, axis=0), axes=0)
+                        * (np.exp(-groups_epss) - 1.0)
+                    )
+                    q_new = q + dt * (np.sum(G * p, axis=0) - (np.sum(F, axis=0) * q))
+                    p_new = p + dt * (
+                        (F * q)
+                        + (
+                            (
+                                np.tensordot(
+                                    np.ones(self.nstat), np.sum(groups_fs * p, axis=0), axes=0,
+                                )
+                                - (groups_fs * p)
+                            )
+                            * F
+                        )
+                        - (G * p)
+                        - (
+                            (np.tensordot(np.ones(self.nstat), np.sum(F, axis=0), axes=0) - F)
+                            * groups_fs
+                            * p
+                        )
+                    )
+                    (
+                        qpn_new[0],
+                        qpn_new[1 : self.nstat + 1],
+                        qpn_new[self.nstat + 1 : 2 * self.nstat + 1],
+                    ) = (q_new, p_new, n_new)
+                    return grad_mat
+
+            # Define a function which takes the adjoint system forward
+            # in time by a step
+            def next_h_step(qpn, t, dt=timescale):
+                qpn_new = qpn
+                q, p, n = (
+                    qpn[0],
+                    qpn[1 : self.nstat + 1],
+                    qpn[self.nstat + 1 : 2 * self.nstat + 1],
+                )
+                due_mask = (t >= groups_vts) * (groups_vts != -1.0)
+                groups_vefs_deliv[due_mask] = groups_vefs[due_mask]
+                gLs = Lams_function(p, groups_Lams)
+                groups_Lams_v = gLs * (1.0 - groups_vefs_deliv)
+                groups_sigsLams_v = np.minimum(
+                    groups_sigs * gLs, gLs * (1.0 - groups_vefs_deliv)
+                )
+                n_new = n + dt * (
+                    (groups_sigsLams_v * np.tensordot(np.ones(self.nstat), q, axes=0))
+                    + (
+                        (
+                            np.tensordot(
+                                np.ones(self.nstat), np.sum(groups_fs * p, axis=0), axes=0,
+                            )
+                            - (groups_fs * p)
+                        )
+                        * groups_sigsLams_v
+                    )
+                )
+                F = (groups_Lams_v * np.exp(-n)) + (groups_sigsLams_v * (1.0 - np.exp(-n)))
+                G = groups_mumaxs + (groups_mus - groups_mumaxs) * np.exp(
+                    np.tensordot(np.ones(self.nstat), np.sum(n, axis=0), axes=0)
+                    * (np.exp(-groups_epss) - 1.0)
+                )
+                q_new = q + dt * (np.sum(G * p, axis=0) - (np.sum(F, axis=0) * q))
+                p_new = p + dt * (
+                    (F * q)
+                    + (
+                        (
+                            np.tensordot(
+                                np.ones(self.nstat), np.sum(groups_fs * p, axis=0), axes=0,
+                            )
+                            - (groups_fs * p)
+                        )
+                        * F
+                    )
+                    - (G * p)
+                    - (
+                        (np.tensordot(np.ones(self.nstat), np.sum(F, axis=0), axes=0) - F)
+                        * groups_fs
+                        * p
+                    )
+                )
+                (
+                    qpn_new[0],
+                    qpn_new[1 : self.nstat + 1],
+                    qpn_new[self.nstat + 1 : 2 * self.nstat + 1],
+                ) = (q_new, p_new, n_new)
+                return qpn_new
+
+            # Define a function which runs the system over the specified
+            # time period and computes the log-likelihood and its gradient
+            def compute_lnlike(qpn0, t0, tend, dt=timescale):
+                qpn = qpn0
+                steps = int((tend - t0) / dt)
+                t, past_t  = t0, t0
+                lnlike, Dlnlike = 0.0, 0.0
+                t_count = 0.0
+                DerThetaM = []
                 for i in range(0, steps):
                     qpn = next_step(qpn, t, dt=dt)
+                    DerThetaM.append(ode_RHS_grad_mat(qpn, t))
                     past_t = t
                     t += dt
-                    rec = ((t >= data_times) * (data_times > past_t)) == True
+                    t_count += dt
+                    rec = ((t >= data_times) & (data_times > past_t)) == True
                     if np.any(rec):
                         data_qp = qpn[: self.nstat + 1][(data_Currs[rec], data_groups[rec])]
                         lnlike += np.sum(data_counts[rec] * np.log(data_qp))
-                        Dlnlike += np.zeros(3 * self.nstat + 1)
+                        h = np.zeros((2 * self.nstat + 1, num_of_groups))
+                        h[: self.nstat + 1][(data_Currs[rec], data_groups[rec])] -= (
+                            data_counts[rec] / data_qp
+                        )
+                        # Evolve h backward in time and integrate over it with DerThetaM
+                        backsteps = int(t_count / dt)
+                        for j in range(0, backsteps):
+                            h = next_h_step(h, t, dt=dt)
+                            Dlnlike += np.sum(h * DerThetaM[-(1+j)] * dt, axis=(0, 1))
+                        t_count = 0.0
+                        DerThetaM = []
                 return lnlike, Dlnlike
-            else:
+        else:
+            # Define a function which runs the system over the specified
+            # time period and computes the log-likelihood
+            def compute_lnlike(qpn0, t0, tend, dt=timescale):
+                qpn = qpn0
+                steps = int((tend - t0) / dt)
+                t, past_t = t0, t0
+                lnlike = 0.0
                 for i in range(0, steps):
                     qpn = next_step(qpn, t, dt=dt)
                     past_t = t
                     t += dt
-                    rec = ((t >= data_times) * (data_times > past_t)) == True
+                    rec = ((t >= data_times) & (data_times > past_t)) == True
                     if np.any(rec):
                         data_qp = qpn[: self.nstat + 1][(data_Currs[rec], data_groups[rec])]
                         lnlike += np.sum(data_counts[rec] * np.log(data_qp))
